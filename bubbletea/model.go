@@ -228,7 +228,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	)
 }
 
-func (m *Model) processEvent(evt pipe.Event) {
+func (m Model) processEvent(evt pipe.Event) {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
 		m.output.WriteString(e.Delta)

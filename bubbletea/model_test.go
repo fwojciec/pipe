@@ -160,6 +160,19 @@ func TestModel_Update(t *testing.T) {
 		assert.NoError(t, model.Err())
 	})
 
+	t.Run("enter during agent run is ignored", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		m, _ = bt.SetRunning(m)
+
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model := updated.(bt.Model)
+
+		assert.True(t, model.Running())
+		assert.Nil(t, cmd)
+	})
+
 	t.Run("ctrl+c during agent run cancels operation", func(t *testing.T) {
 		t.Parallel()
 
