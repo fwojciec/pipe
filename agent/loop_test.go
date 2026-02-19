@@ -492,7 +492,7 @@ func TestLoop_Run(t *testing.T) {
 		assert.Equal(t, events, received)
 	})
 
-	t.Run("nil event handler is safe", func(t *testing.T) {
+	t.Run("nil event handler is safe without option", func(t *testing.T) {
 		t.Parallel()
 
 		msg := pipe.AssistantMessage{
@@ -517,6 +517,114 @@ func TestLoop_Run(t *testing.T) {
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
 		require.Len(t, session.Messages, 1)
+	})
+
+	t.Run("nil event handler is safe with explicit nil", func(t *testing.T) {
+		t.Parallel()
+
+		msg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				return completedStream(msg), nil
+			},
+		}
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return nil, nil
+			},
+		}
+
+		session := &pipe.Session{}
+		loop := agent.New(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(nil))
+		require.NoError(t, err)
+		require.Len(t, session.Messages, 1)
+	})
+
+	t.Run("event handler receives events across multi-turn run", func(t *testing.T) {
+		t.Parallel()
+
+		turn1Events := []pipe.Event{
+			pipe.EventTextDelta{Index: 0, Delta: "calling tool"},
+		}
+		turn2Events := []pipe.Event{
+			pipe.EventTextDelta{Index: 0, Delta: "done"},
+		}
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "done"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					idx := 0
+					return &mock.Stream{
+						NextFn: func() (pipe.Event, error) {
+							if idx >= len(turn1Events) {
+								return nil, io.EOF
+							}
+							e := turn1Events[idx]
+							idx++
+							return e, nil
+						},
+						MessageFn: func() (pipe.AssistantMessage, error) {
+							return toolCallMsg, nil
+						},
+					}, nil
+				}
+				idx := 0
+				return &mock.Stream{
+					NextFn: func() (pipe.Event, error) {
+						if idx >= len(turn2Events) {
+							return nil, io.EOF
+						}
+						e := turn2Events[idx]
+						idx++
+						return e, nil
+					},
+					MessageFn: func() (pipe.AssistantMessage, error) {
+						return textMsg, nil
+					},
+				}, nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return &pipe.ToolResult{
+					Content: []pipe.ContentBlock{pipe.TextBlock{Text: "output"}},
+				}, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := agent.New(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		allExpected := append(turn1Events, turn2Events...) //nolint:gocritic // intentional append to new slice
+		assert.Equal(t, allExpected, received)
 	})
 
 	t.Run("tool results included in subsequent request", func(t *testing.T) {
