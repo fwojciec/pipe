@@ -60,9 +60,10 @@ git checkout main
 git pull origin main
 ```
 
-If there are uncommitted changes, stash them:
+If there are uncommitted changes, stash them and warn:
 ```bash
 git stash push -m "ralph-stash-$(date +%s)"
+echo "WARNING: Uncommitted changes were stashed. Run 'git stash list' to recover them."
 ```
 
 ### 2.2 Create Feature Branch

@@ -24,7 +24,7 @@ LOGFILE="ralph-$(date +%Y%m%d-%H%M%S).log"
 COMPLETE_MARKER=".ralph-complete"
 
 # Verify milestone exists
-if ! gh api 'repos/:owner/:repo/milestones?per_page=100' --jq '.[].title' | grep -qx "$MILESTONE"; then
+if ! gh api 'repos/:owner/:repo/milestones?per_page=100' --jq '.[].title' | grep -qxF "$MILESTONE"; then
     echo "Error: Milestone '$MILESTONE' not found"
     echo ""
     echo "Available milestones:"
@@ -48,7 +48,10 @@ while :; do
     iteration=$((iteration + 1))
 
     # Check remaining open issues
-    remaining=$(gh issue list --milestone "$MILESTONE" --state open --json number --jq 'length')
+    remaining=$(gh issue list --milestone "$MILESTONE" --state open --json number --jq 'length') || {
+        echo "ERROR: Failed to query issues. Check gh auth status." | tee -a "$LOGFILE"
+        exit 1
+    }
 
     echo ""
     echo "=============================================="
@@ -63,6 +66,7 @@ while :; do
     fi
 
     # Run one iteration
+    set +e
     "$CLAUDE" -p "/ralph $MILESTONE" \
         --dangerously-skip-permissions \
         --output-format stream-json 2>&1 | \
@@ -89,7 +93,13 @@ while :; do
                 "\n--- Iteration complete ---"
             else empty
             end
-        ' 2>/dev/null || true
+        ' 2>/dev/null
+    claude_exit=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$claude_exit" -ne 0 ]; then
+        echo "WARNING: Claude exited with code $claude_exit" | tee -a "$LOGFILE"
+    fi
 
     # Check if signaled complete
     if [ -f "$COMPLETE_MARKER" ]; then
