@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/fwojciec/pipe"
 )
 
@@ -71,7 +72,7 @@ func ExecuteGrep(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 	var b strings.Builder
 
 	if !info.IsDir() {
-		grepFile(&b, a.Path, a.Path, re)
+		grepFile(&b, a.Path, filepath.Dir(a.Path), re)
 	} else {
 		err = filepath.WalkDir(a.Path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -81,7 +82,11 @@ func ExecuteGrep(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 				return nil
 			}
 			if a.Glob != "" {
-				matched, matchErr := filepath.Match(a.Glob, d.Name())
+				rel, relErr := filepath.Rel(a.Path, path)
+				if relErr != nil {
+					return nil
+				}
+				matched, matchErr := doublestar.Match(a.Glob, filepath.ToSlash(rel))
 				if matchErr != nil || !matched {
 					return nil
 				}
@@ -110,8 +115,8 @@ func grepFile(b *strings.Builder, path string, basePath string, re *regexp.Regex
 
 	// Read first 512 bytes to detect binary files.
 	header := make([]byte, 512)
-	n, err := f.Read(header)
-	if err != nil {
+	n, _ := f.Read(header)
+	if n == 0 {
 		return
 	}
 	if bytes.ContainsRune(header[:n], 0) {

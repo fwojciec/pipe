@@ -49,8 +49,8 @@ func TestGrepTool(t *testing.T) {
 
 		text, ok := result.Content[0].(pipe.TextBlock)
 		require.True(t, ok)
-		assert.Contains(t, text.Text, "func hello()")
-		assert.Contains(t, text.Text, "func world()")
+		assert.Contains(t, text.Text, "test.go:3:func hello()")
+		assert.Contains(t, text.Text, "test.go:4:func world()")
 	})
 
 	t.Run("searches directory recursively", func(t *testing.T) {
