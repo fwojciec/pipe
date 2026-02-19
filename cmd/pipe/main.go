@@ -110,6 +110,9 @@ func run() error {
 	} else if len(session.Messages) > 0 {
 		// Auto-save to default location.
 		savePath := defaultSessionPath(session.ID)
+		if err := os.MkdirAll(filepath.Dir(savePath), 0o700); err != nil {
+			return fmt.Errorf("create session dir: %w", err)
+		}
 		if err := pipejson.Save(savePath, session); err != nil {
 			return fmt.Errorf("auto-save session: %w", err)
 		}

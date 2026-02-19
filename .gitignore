@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/pipe
 /cmd/pipe/pipe
 *.exe
 *.exe~
