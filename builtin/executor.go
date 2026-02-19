@@ -19,8 +19,8 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
-// Execute dispatches a tool call by name. Returns an infrastructure error for
-// unknown tool names.
+// Execute dispatches a tool call by name. Unknown tool names return an IsError
+// result so the model can self-correct.
 func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
 	switch name {
 	case "bash":
@@ -32,7 +32,10 @@ func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessag
 	case "edit":
 		return ExecuteEdit(ctx, args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		return &pipe.ToolResult{
+			Content: []pipe.ContentBlock{pipe.TextBlock{Text: fmt.Sprintf("unknown tool: %s", name)}},
+			IsError: true,
+		}, nil
 	}
 }
 

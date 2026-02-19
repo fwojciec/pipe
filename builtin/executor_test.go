@@ -88,12 +88,16 @@ func TestExecutor(t *testing.T) {
 		assert.Equal(t, "new value", string(data))
 	})
 
-	t.Run("returns error for unknown tool", func(t *testing.T) {
+	t.Run("returns tool error for unknown tool", func(t *testing.T) {
 		t.Parallel()
 		exec := builtin.NewExecutor()
-		_, err := exec.Execute(context.Background(), "nonexistent", json.RawMessage(`{}`))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "nonexistent")
+		result, err := exec.Execute(context.Background(), "nonexistent", json.RawMessage(`{}`))
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Contains(t, text.Text, "nonexistent")
 	})
 
 	t.Run("Tools returns all tool definitions", func(t *testing.T) {
