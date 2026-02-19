@@ -74,6 +74,14 @@ func TestStream_Next(t *testing.T) {
 		_, err := s.Next()
 		assert.ErrorIs(t, err, io.EOF)
 	})
+
+	t.Run("panics when NextFn not set", func(t *testing.T) {
+		t.Parallel()
+		s := mock.Stream{}
+		assert.Panics(t, func() {
+			_, _ = s.Next()
+		})
+	})
 }
 
 func TestStream_State(t *testing.T) {
@@ -86,6 +94,12 @@ func TestStream_State(t *testing.T) {
 			},
 		}
 		assert.Equal(t, pipe.StreamStateComplete, s.State())
+	})
+
+	t.Run("returns StreamStateNew when StateFn not set", func(t *testing.T) {
+		t.Parallel()
+		s := mock.Stream{}
+		assert.Equal(t, pipe.StreamStateNew, s.State())
 	})
 }
 
@@ -105,6 +119,14 @@ func TestStream_Message(t *testing.T) {
 		got, err := s.Message()
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
+	})
+
+	t.Run("panics when MessageFn not set", func(t *testing.T) {
+		t.Parallel()
+		s := mock.Stream{}
+		assert.Panics(t, func() {
+			_, _ = s.Message()
+		})
 	})
 }
 
@@ -134,6 +156,12 @@ func TestStream_Close(t *testing.T) {
 		}
 		err := s.Close()
 		assert.ErrorIs(t, err, wantErr)
+	})
+
+	t.Run("returns nil when CloseFn not set", func(t *testing.T) {
+		t.Parallel()
+		s := mock.Stream{}
+		assert.NoError(t, s.Close())
 	})
 }
 
