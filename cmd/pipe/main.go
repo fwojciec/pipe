@@ -25,10 +25,12 @@ import (
 	"github.com/fwojciec/pipe"
 	"github.com/fwojciec/pipe/agent"
 	"github.com/fwojciec/pipe/anthropic"
-	"github.com/fwojciec/pipe/builtin"
 	bt "github.com/fwojciec/pipe/bubbletea"
+	"github.com/fwojciec/pipe/builtin"
 	pipejson "github.com/fwojciec/pipe/json"
 )
+
+const defaultPromptPath = ".pipe/prompt.md"
 
 func main() {
 	if err := run(); err != nil {
@@ -40,10 +42,10 @@ func main() {
 func run() error {
 	// Parse flags.
 	var (
-		model        = flag.String("model", "", "Model ID (provider-specific)")
-		sessionPath  = flag.String("session", "", "Path to session file to resume")
-		promptPath   = flag.String("system-prompt", ".pipe/prompt.md", "Path to system prompt file")
-		apiKey       = flag.String("api-key", "", "Anthropic API key (overrides ANTHROPIC_API_KEY)")
+		model       = flag.String("model", "", "Model ID (provider-specific)")
+		sessionPath = flag.String("session", "", "Path to session file to resume")
+		promptPath  = flag.String("system-prompt", defaultPromptPath, "Path to system prompt file")
+		apiKey      = flag.String("api-key", "", "Anthropic API key (overrides ANTHROPIC_API_KEY)")
 	)
 	flag.Parse()
 
@@ -126,10 +128,14 @@ func loadOrCreateSession(sessionPath, promptPath string) (pipe.Session, error) {
 		return s, nil
 	}
 
-	// Load system prompt.
+	// Load system prompt. Fail on explicit paths; tolerate missing default.
 	systemPrompt := "You are a helpful coding assistant."
-	if data, err := os.ReadFile(promptPath); err == nil {
+	data, err := os.ReadFile(promptPath)
+	switch {
+	case err == nil:
 		systemPrompt = string(data)
+	case promptPath != defaultPromptPath:
+		return pipe.Session{}, fmt.Errorf("read system prompt: %w", err)
 	}
 
 	// Create new session.
