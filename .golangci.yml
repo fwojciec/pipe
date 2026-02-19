@@ -2,7 +2,7 @@
 version: "2"
 
 run:
-  go: "1.25"
+  go: "1.24"
   tests: true
 
 linters:
@@ -49,25 +49,16 @@ linters:
       - std-error-handling
     rules:
       - linters:
-          - govet
-        text: shadows declaration
-        source: err :=
-      - linters:
           - gochecknoglobals
         path: _test\.go
       - linters:
           - errcheck
         path: _test\.go
       - linters:
-          - thelper
-        path: _test\.go
-      - linters:
           - gochecknoglobals
         path: cmd/.*/main\.go
     paths:
       - third_party$
-      - builtin$
-      - examples$
 
 issues:
   max-issues-per-linter: 50
@@ -78,5 +69,3 @@ formatters:
     generated: lax
     paths:
       - third_party$
-      - builtin$
-      - examples$
