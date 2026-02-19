@@ -1,6 +1,20 @@
 # Binaries
-pipe
-/cmd/pipe/pipe
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+
+# Dependency directories
+vendor/
 
 # IDE
 .idea/
@@ -10,6 +24,7 @@ pipe
 
 # OS
 .DS_Store
+Thumbs.db
 
-# Test
-coverage.out
+# Local config
+.claude/settings.local.json
