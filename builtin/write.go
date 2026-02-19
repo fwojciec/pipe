@@ -57,9 +57,10 @@ func ExecuteWrite(_ context.Context, args json.RawMessage) (*pipe.ToolResult, er
 		perm = info.Mode().Perm()
 	}
 
-	if err := os.WriteFile(a.FilePath, []byte(a.Content), perm); err != nil {
+	data := []byte(a.Content)
+	if err := os.WriteFile(a.FilePath, data, perm); err != nil {
 		return domainError(fmt.Sprintf("failed to write file: %s", err)), nil
 	}
 
-	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(a.Content), a.FilePath)), nil
+	return textResult(fmt.Sprintf("wrote %d bytes to %s", len(data), a.FilePath)), nil
 }

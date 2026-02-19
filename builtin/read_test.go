@@ -181,7 +181,6 @@ func TestReadTool(t *testing.T) {
 
 		text, ok := result.Content[0].(pipe.TextBlock)
 		require.True(t, ok)
-		assert.Contains(t, text.Text, "1")
-		assert.Contains(t, text.Text, "alpha")
+		assert.Contains(t, text.Text, "1\talpha")
 	})
 }

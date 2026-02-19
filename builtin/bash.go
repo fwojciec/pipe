@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -70,11 +71,20 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 	err := cmd.Run()
 	output := buf.String()
 
-	if ctx.Err() != nil {
-		return domainError(fmt.Sprintf("command timed out or cancelled: %s\n%s", ctx.Err(), output)), nil
-	}
-
 	if err != nil {
+		// If the process exited on its own with a non-zero exit code, report that
+		// even if the context also expired around the same time. A process killed
+		// by our cancellation signal has ExitCode() == -1.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
+			return &pipe.ToolResult{
+				Content: []pipe.ContentBlock{pipe.TextBlock{Text: output + "\n" + err.Error()}},
+				IsError: true,
+			}, nil
+		}
+		if ctx.Err() != nil {
+			return domainError(fmt.Sprintf("command timed out or cancelled: %s\n%s", ctx.Err(), output)), nil
+		}
 		return &pipe.ToolResult{
 			Content: []pipe.ContentBlock{pipe.TextBlock{Text: output + "\n" + err.Error()}},
 			IsError: true,
