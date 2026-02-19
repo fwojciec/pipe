@@ -331,8 +331,6 @@ the `json/` package provides `Save()`/`Load()` with format conversion.
 
 Items deferred to implementation:
 
-- **Content block validation**: Enforce valid combinations (e.g. no ToolCallBlock
-  in UserMessage) at construction/use time, not at the type level.
 - **ImageBlock sizing**: Define max sizes and/or external blob references when
   implementing persistence.
 - **Stream conformance tests**: cancellation, EOF, partial reads, close-unblocks-read.
