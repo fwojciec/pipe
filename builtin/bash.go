@@ -76,13 +76,8 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 		// even if the context also expired around the same time. A process killed
 		// by our cancellation signal has ExitCode() == -1.
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() >= 0 {
-			return &pipe.ToolResult{
-				Content: []pipe.ContentBlock{pipe.TextBlock{Text: output + "\n" + err.Error()}},
-				IsError: true,
-			}, nil
-		}
-		if ctx.Err() != nil {
+		isRealExit := errors.As(err, &exitErr) && exitErr.ExitCode() >= 0
+		if !isRealExit && ctx.Err() != nil {
 			return domainError(fmt.Sprintf("command timed out or cancelled: %s\n%s", ctx.Err(), output)), nil
 		}
 		return &pipe.ToolResult{
