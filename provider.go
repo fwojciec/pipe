@@ -39,7 +39,7 @@ type Stream interface {
 
 // Provider is a strategy pattern interface for LLM providers.
 type Provider interface {
-	Stream(ctx context.Context, req *Request) (Stream, error)
+	Stream(ctx context.Context, req Request) (Stream, error)
 }
 
 // Request carries model selection and generation parameters.
