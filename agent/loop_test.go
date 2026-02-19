@@ -441,6 +441,84 @@ func TestLoop_Run(t *testing.T) {
 		require.Len(t, capturedReq.Messages, 1)
 	})
 
+	t.Run("event handler receives stream events", func(t *testing.T) {
+		t.Parallel()
+
+		events := []pipe.Event{
+			pipe.EventTextDelta{Index: 0, Delta: "hel"},
+			pipe.EventTextDelta{Index: 0, Delta: "lo"},
+		}
+
+		msg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				idx := 0
+				return &mock.Stream{
+					NextFn: func() (pipe.Event, error) {
+						if idx >= len(events) {
+							return nil, io.EOF
+						}
+						e := events[idx]
+						idx++
+						return e, nil
+					},
+					MessageFn: func() (pipe.AssistantMessage, error) {
+						return msg, nil
+					},
+				}, nil
+			},
+		}
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return nil, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := agent.New(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		assert.Equal(t, events, received)
+	})
+
+	t.Run("nil event handler is safe", func(t *testing.T) {
+		t.Parallel()
+
+		msg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				return completedStream(msg), nil
+			},
+		}
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return nil, nil
+			},
+		}
+
+		session := &pipe.Session{}
+		loop := agent.New(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil)
+		require.NoError(t, err)
+		require.Len(t, session.Messages, 1)
+	})
+
 	t.Run("tool results included in subsequent request", func(t *testing.T) {
 		t.Parallel()
 
