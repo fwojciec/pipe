@@ -55,7 +55,7 @@ protocol errors are reported through `Next()`'s error return, not through events
 ### context.Context on All Interface Methods
 
 All interface methods take `context.Context` as the first parameter, except for
-`Stream.Next()` and `Stream.Close()` which inherit the context from
+`Stream` methods (`Next()`, `Message()`, `Close()`) which inherit the context from
 `Provider.Stream()`. Even local operations should be cancellable (ctrl+c during
 agent loop). The interface doesn't know if the implementation is local or remote.
 
@@ -167,12 +167,16 @@ type EventToolCallEnd struct{ Call ToolCallBlock }
 // Stream uses a pull-based iterator pattern. Cancellation flows through the
 // context passed to Provider.Stream().
 //
-// Message() returns the assembled AssistantMessage at any point:
-// - After io.EOF: complete message, nil error.
-// - After non-EOF error: partial message (what was assembled before failure),
-//   nil error. StopReason will be StopError. Partial output is recoverable
-//   for debugging/retry UX.
+// Message() returns the assembled AssistantMessage. Behavior by stream state:
+// - After Next() returns io.EOF: complete message, nil error.
+// - After Next() returns non-EOF error: partial message, nil error.
+//   StopReason is StopError for transport/protocol failures, StopAborted
+//   for context cancellation.
+// - Mid-stream (some deltas received, no terminal state): partial message,
+//   nil error. Content reflects deltas received so far.
 // - Before Next() is ever called: zero-value message, non-nil error.
+// - After Close(): same as last terminal state (EOF or error). If Close()
+//   is called mid-stream, subsequent Next() calls return an error.
 type Stream interface {
     Next() (Event, error)
     Message() (AssistantMessage, error)
