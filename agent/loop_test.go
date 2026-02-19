@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -567,11 +569,11 @@ func TestLoop_Run(t *testing.T) {
 			StopReason: pipe.StopEndTurn,
 		}
 
-		turn := 0
+		var turn atomic.Int32
 		provider := &mock.Provider{
 			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
-				turn++
-				if turn == 1 {
+				n := turn.Add(1)
+				if n == 1 {
 					idx := 0
 					return &mock.Stream{
 						NextFn: func() (pipe.Event, error) {
@@ -623,7 +625,7 @@ func TestLoop_Run(t *testing.T) {
 		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(handler))
 		require.NoError(t, err)
 
-		allExpected := append(turn1Events, turn2Events...) //nolint:gocritic // intentional append to new slice
+		allExpected := slices.Concat(turn1Events, turn2Events)
 		assert.Equal(t, allExpected, received)
 	})
 
