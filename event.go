@@ -9,14 +9,18 @@ type Event interface {
 }
 
 // EventTextDelta represents a text content delta.
+// Index identifies which text block this delta belongs to within the message.
 type EventTextDelta struct {
+	Index int
 	Delta string
 }
 
 func (EventTextDelta) event() {}
 
 // EventThinkingDelta represents a thinking content delta.
+// Index identifies which thinking block this delta belongs to within the message.
 type EventThinkingDelta struct {
+	Index int
 	Delta string
 }
 

@@ -60,6 +60,25 @@ func TestMessageTypeSwitch_Exhaustive(t *testing.T) {
 	}
 }
 
+func TestMessage_Role(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		msg  pipe.Message
+		want pipe.Role
+	}{
+		{"UserMessage", pipe.UserMessage{}, pipe.RoleUser},
+		{"AssistantMessage", pipe.AssistantMessage{}, pipe.RoleAssistant},
+		{"ToolResultMessage", pipe.ToolResultMessage{}, pipe.RoleToolResult},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.msg.Role())
+		})
+	}
+}
+
 func TestContentBlock_TextBlock(t *testing.T) {
 	t.Parallel()
 	var block pipe.ContentBlock = pipe.TextBlock{Text: "hello"}

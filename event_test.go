@@ -10,13 +10,13 @@ import (
 
 func TestEventTextDelta_ImplementsEvent(t *testing.T) {
 	t.Parallel()
-	var e pipe.Event = pipe.EventTextDelta{Delta: "hello"}
+	var e pipe.Event = pipe.EventTextDelta{Index: 0, Delta: "hello"}
 	assert.NotNil(t, e)
 }
 
 func TestEventThinkingDelta_ImplementsEvent(t *testing.T) {
 	t.Parallel()
-	var e pipe.Event = pipe.EventThinkingDelta{Delta: "reasoning..."}
+	var e pipe.Event = pipe.EventThinkingDelta{Index: 0, Delta: "reasoning..."}
 	assert.NotNil(t, e)
 }
 
@@ -47,8 +47,8 @@ func TestEventToolCallEnd_ImplementsEvent(t *testing.T) {
 func TestEventTypeSwitch_Exhaustive(t *testing.T) {
 	t.Parallel()
 	events := []pipe.Event{
-		pipe.EventTextDelta{Delta: "hello"},
-		pipe.EventThinkingDelta{Delta: "reasoning"},
+		pipe.EventTextDelta{Index: 0, Delta: "hello"},
+		pipe.EventThinkingDelta{Index: 0, Delta: "reasoning"},
 		pipe.EventToolCallBegin{ID: "tc_1", Name: "read"},
 		pipe.EventToolCallDelta{ID: "tc_1", Delta: `{"path":"`},
 		pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc_1", Name: "read"}},

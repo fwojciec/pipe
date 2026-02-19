@@ -7,8 +7,10 @@ import (
 
 // Message is a sealed interface representing a conversation message.
 // The unexported marker method prevents external implementations.
+// Role() returns the message's role without requiring a type switch.
 type Message interface {
-	role() Role
+	isMessage()
+	Role() Role
 }
 
 // UserMessage represents a message from the user.
@@ -17,7 +19,10 @@ type UserMessage struct {
 	Timestamp time.Time
 }
 
-func (UserMessage) role() Role { return RoleUser }
+func (UserMessage) isMessage() {}
+
+// Role returns RoleUser.
+func (UserMessage) Role() Role { return RoleUser }
 
 // AssistantMessage represents a message from the assistant.
 type AssistantMessage struct {
@@ -28,7 +33,10 @@ type AssistantMessage struct {
 	Timestamp     time.Time
 }
 
-func (AssistantMessage) role() Role { return RoleAssistant }
+func (AssistantMessage) isMessage() {}
+
+// Role returns RoleAssistant.
+func (AssistantMessage) Role() Role { return RoleAssistant }
 
 // ToolResultMessage represents the result of a tool execution.
 type ToolResultMessage struct {
@@ -39,7 +47,10 @@ type ToolResultMessage struct {
 	Timestamp  time.Time
 }
 
-func (ToolResultMessage) role() Role { return RoleToolResult }
+func (ToolResultMessage) isMessage() {}
+
+// Role returns RoleToolResult.
+func (ToolResultMessage) Role() Role { return RoleToolResult }
 
 // ContentBlock is a sealed interface representing a block of content.
 // The unexported marker method prevents external implementations.
