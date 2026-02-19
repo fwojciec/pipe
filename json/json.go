@@ -111,6 +111,7 @@ func Save(path string, s pipe.Session) error {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp) // best-effort cleanup
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil
