@@ -118,7 +118,7 @@ Must pass before review.
 ### 4.2 Stage All Changes
 
 ```bash
-git add -A
+git add .
 ```
 
 ### 4.3 Run Roborev Review
@@ -141,7 +141,7 @@ Then re-validate, commit, compact stale findings, and re-review:
 
 ```bash
 make validate
-git add -A
+git add .
 git commit -m "Address review findings
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
@@ -192,7 +192,7 @@ The loop will retry this issue on the next iteration with improved context.
 ### 5.1 Final Commit
 
 ```bash
-git add -A
+git add .
 git commit -m "$(cat <<'EOF'
 <issue-title>
 

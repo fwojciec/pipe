@@ -107,7 +107,7 @@ make validate
 Review all changes on the branch:
 
 ```bash
-git add -A
+git add .
 git commit -m "<descriptive message>
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
@@ -123,7 +123,7 @@ roborev review --branch --wait
 ```bash
 roborev fix
 make validate
-git add -A
+git add .
 git commit -m "Address review feedback
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
