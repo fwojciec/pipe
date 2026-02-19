@@ -1,0 +1,5 @@
+```
+|
+
+Ceci n'est pas une pipe.
+```
