@@ -101,6 +101,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentDoneMsg:
 		m.running = false
 		m.cancel = nil
+		m.eventCh = nil
+		m.doneCh = nil
 		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.err = msg.Err
 		}

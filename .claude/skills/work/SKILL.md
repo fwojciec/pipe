@@ -127,6 +127,7 @@ git add -A
 git commit -m "Address review feedback
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+roborev compact --wait
 roborev review --branch --wait
 ```
 

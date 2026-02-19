@@ -144,4 +144,6 @@ func grepFile(b *strings.Builder, path string, basePath string, re *regexp.Regex
 			fmt.Fprintf(b, "%s:%d:%s\n", relPath, lineNum, line)
 		}
 	}
+	// scanner.Err() intentionally unchecked — partial results are acceptable
+	// for grep, matching standard grep behavior on oversized lines.
 }

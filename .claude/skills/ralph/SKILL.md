@@ -137,11 +137,15 @@ roborev review --wait
 roborev fix
 ```
 
-Then re-validate and re-review:
+Then re-validate, commit, compact stale findings, and re-review:
 
 ```bash
 make validate
 git add -A
+git commit -m "Address review findings
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+roborev compact --wait
 roborev review --wait
 ```
 

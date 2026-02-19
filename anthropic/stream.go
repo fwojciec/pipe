@@ -223,6 +223,7 @@ func (s *stream) handleContentBlockStart(data string) (pipe.Event, error) {
 	case "tool_use":
 		bs.toolID = evt.ContentBlock.ID
 		bs.toolName = evt.ContentBlock.Name
+		s.msg.Content[evt.Index] = pipe.ToolCallBlock{ID: bs.toolID, Name: bs.toolName}
 		return pipe.EventToolCallBegin{ID: evt.ContentBlock.ID, Name: evt.ContentBlock.Name}, nil
 	case "text":
 		// No semantic event for text block start.
