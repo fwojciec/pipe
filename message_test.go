@@ -49,6 +49,7 @@ func TestMessageTypeSwitch_Exhaustive(t *testing.T) {
 		pipe.AssistantMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "hi"}}},
 		pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read"},
 	}
+	assert.Len(t, messages, 3, "update slice and switch when adding new Message types")
 	for _, msg := range messages {
 		switch msg.(type) {
 		case pipe.UserMessage:
@@ -118,6 +119,7 @@ func TestContentBlockTypeSwitch_Exhaustive(t *testing.T) {
 		pipe.ImageBlock{Data: []byte{0x89}, MimeType: "image/png"},
 		pipe.ToolCallBlock{ID: "tc_1", Name: "read", Arguments: json.RawMessage(`{}`)},
 	}
+	assert.Len(t, blocks, 4, "update slice and switch when adding new ContentBlock types")
 	for _, block := range blocks {
 		switch block.(type) {
 		case pipe.TextBlock:

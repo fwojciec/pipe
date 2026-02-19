@@ -53,6 +53,7 @@ func TestEventTypeSwitch_Exhaustive(t *testing.T) {
 		pipe.EventToolCallDelta{ID: "tc_1", Delta: `{"path":"`},
 		pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc_1", Name: "read"}},
 	}
+	assert.Len(t, events, 5, "update slice and switch when adding new Event types")
 	for _, e := range events {
 		switch e.(type) {
 		case pipe.EventTextDelta:
