@@ -80,6 +80,22 @@ func TestWriteTool(t *testing.T) {
 		assert.Equal(t, "deep file", string(data))
 	})
 
+	t.Run("preserves permissions of existing file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "script.sh")
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/bash\necho old\n"), 0o755))
+
+		args, _ := json.Marshal(map[string]any{"file_path": path, "content": "#!/bin/bash\necho new\n"})
+		result, err := builtin.ExecuteWrite(context.Background(), args)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+	})
+
 	t.Run("returns domain error for missing file_path", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"content": "hello"}`)

@@ -58,6 +58,10 @@ func ExecuteEdit(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 		return domainError("file_path is required"), nil
 	}
 
+	if a.OldString == "" {
+		return domainError("old_string must not be empty"), nil
+	}
+
 	info, err := os.Stat(a.FilePath)
 	if err != nil {
 		return domainError(fmt.Sprintf("failed to stat file: %s", err)), nil

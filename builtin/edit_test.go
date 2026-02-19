@@ -165,6 +165,48 @@ func TestEditTool(t *testing.T) {
 		assert.Equal(t, "func new() {\n\treturn 2\n}\n", string(data))
 	})
 
+	t.Run("errors on empty old_string", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.go")
+		require.NoError(t, os.WriteFile(path, []byte("hello world"), 0o644))
+
+		args, _ := json.Marshal(map[string]any{
+			"file_path":  path,
+			"old_string": "",
+			"new_string": "replacement",
+		})
+		result, err := builtin.ExecuteEdit(context.Background(), args)
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Contains(t, text.Text, "old_string must not be empty")
+	})
+
+	t.Run("errors on empty old_string with replace_all", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.go")
+		require.NoError(t, os.WriteFile(path, []byte("hello world"), 0o644))
+
+		args, _ := json.Marshal(map[string]any{
+			"file_path":   path,
+			"old_string":  "",
+			"new_string":  "X",
+			"replace_all": true,
+		})
+		result, err := builtin.ExecuteEdit(context.Background(), args)
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+
+		// File should be unchanged.
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world", string(data))
+	})
+
 	t.Run("preserves file permissions", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

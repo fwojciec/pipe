@@ -52,7 +52,12 @@ func ExecuteWrite(_ context.Context, args json.RawMessage) (*pipe.ToolResult, er
 		return domainError(fmt.Sprintf("failed to create directories: %s", err)), nil
 	}
 
-	if err := os.WriteFile(a.FilePath, []byte(a.Content), 0o644); err != nil {
+	perm := os.FileMode(0o644)
+	if info, err := os.Stat(a.FilePath); err == nil {
+		perm = info.Mode().Perm()
+	}
+
+	if err := os.WriteFile(a.FilePath, []byte(a.Content), perm); err != nil {
 		return domainError(fmt.Sprintf("failed to write file: %s", err)), nil
 	}
 

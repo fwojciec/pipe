@@ -62,6 +62,7 @@ func ExecuteRead(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 
 	var b strings.Builder
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNum := 0
 	linesRead := 0
 

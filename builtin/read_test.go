@@ -137,6 +137,38 @@ func TestReadTool(t *testing.T) {
 		assert.True(t, result.IsError)
 	})
 
+	t.Run("reads empty file", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "empty.txt")
+		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+
+		args, _ := json.Marshal(map[string]any{"file_path": path})
+		result, err := builtin.ExecuteRead(context.Background(), args)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Empty(t, text.Text)
+	})
+
+	t.Run("offset beyond file length returns empty content", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "short.txt")
+		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\n"), 0o644))
+
+		args, _ := json.Marshal(map[string]any{"file_path": path, "offset": 100})
+		result, err := builtin.ExecuteRead(context.Background(), args)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Empty(t, text.Text)
+	})
+
 	t.Run("includes line numbers in output", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
