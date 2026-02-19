@@ -40,7 +40,7 @@ func New(run AgentFunc, session *pipe.Session) Model {
 	ta.Focus()
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
-	ta.SetHeight(3)
+	ta.SetHeight(1)
 
 	return Model{
 		Textarea: ta,
@@ -106,9 +106,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
-	case channelClosedMsg:
-		// Event channel closed; agentDoneMsg will arrive via done channel.
-		return m, listenForDone(m.doneCh)
 	}
 
 	// Pass remaining messages to sub-components.
@@ -147,7 +144,7 @@ func (m Model) View() string {
 }
 
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
-	inputHeight := 3
+	inputHeight := 1
 	statusHeight := 1
 	borderHeight := 2 // newlines between sections
 	vpHeight := msg.Height - inputHeight - statusHeight - borderHeight
@@ -264,7 +261,10 @@ func (m Model) statusLine() string {
 func startAgent(run AgentFunc, ctx context.Context, session *pipe.Session, eventCh chan<- pipe.Event, doneCh chan<- error) tea.Cmd {
 	return func() tea.Msg {
 		err := run(ctx, session, func(e pipe.Event) {
-			eventCh <- e
+			select {
+			case eventCh <- e:
+			case <-ctx.Done():
+			}
 		})
 		close(eventCh)
 		doneCh <- err
@@ -282,13 +282,5 @@ func listenForEvent(ch <-chan pipe.Event, doneCh <-chan error) tea.Cmd {
 			return AgentDoneMsg{Err: err}
 		}
 		return StreamEventMsg{Event: evt}
-	}
-}
-
-// listenForDone waits for the agent to signal completion.
-func listenForDone(doneCh <-chan error) tea.Cmd {
-	return func() tea.Msg {
-		err := <-doneCh
-		return AgentDoneMsg{Err: err}
 	}
 }

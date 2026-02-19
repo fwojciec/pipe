@@ -57,6 +57,24 @@ func TestModel_Update(t *testing.T) {
 		assert.NotEmpty(t, view)
 	})
 
+	t.Run("window size resize updates viewport dimensions", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+
+		// Send a second WindowSizeMsg with different dimensions.
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		model, ok := updated.(bt.Model)
+		require.True(t, ok)
+
+		assert.Equal(t, 120, model.Viewport.Width)
+		// Height = 40 - inputHeight(1) - statusHeight(1) - borderHeight(2) = 36
+		assert.Equal(t, 36, model.Viewport.Height)
+
+		view := model.View()
+		assert.NotEmpty(t, view)
+	})
+
 	t.Run("ctrl+c when idle quits", func(t *testing.T) {
 		t.Parallel()
 

@@ -21,6 +21,3 @@ type StreamEventMsg struct {
 type AgentDoneMsg struct {
 	Err error
 }
-
-// channelClosedMsg signals that the event channel was closed.
-type channelClosedMsg struct{}
