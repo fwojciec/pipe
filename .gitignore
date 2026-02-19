@@ -26,5 +26,8 @@ vendor/
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+
 # Local config
 .claude/settings.local.json
