@@ -406,3 +406,54 @@ func TestStream_MaxTokensStopReason(t *testing.T) {
 	assert.Equal(t, pipe.StopLength, msg.StopReason)
 	assert.Equal(t, "max_tokens", msg.RawStopReason)
 }
+
+func TestStream_ReadErrorMidStream(t *testing.T) {
+	t.Parallel()
+
+	// Server that sends partial SSE then closes connection abruptly.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n")
+		fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// Connection closes without message_stop — simulates network failure.
+		// The hijack approach ensures an abrupt close.
+		hj, ok := w.(http.Hijacker)
+		if ok {
+			conn, _, _ := hj.Hijack()
+			conn.Close()
+		}
+	}))
+	defer srv.Close()
+
+	client := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+	s, err := client.Stream(context.Background(), pipe.Request{
+		Messages: []pipe.Message{
+			pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+		},
+	})
+	require.NoError(t, err)
+	defer s.Close()
+
+	// First event should succeed.
+	evt, err := s.Next()
+	require.NoError(t, err)
+	assert.Equal(t, pipe.EventTextDelta{Index: 0, Delta: "partial"}, evt)
+
+	// Next should return an error (unexpected EOF or read error).
+	_, err = s.Next()
+	assert.Error(t, err)
+	assert.Equal(t, pipe.StreamStateError, s.State())
+
+	// Message should have partial content with StopError.
+	msg, err := s.Message()
+	require.NoError(t, err)
+	assert.Equal(t, pipe.StopError, msg.StopReason)
+	require.Len(t, msg.Content, 1)
+	assert.Equal(t, pipe.TextBlock{Text: "partial"}, msg.Content[0])
+}

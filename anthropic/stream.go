@@ -32,7 +32,10 @@ type blockState struct {
 	thinkingBuf strings.Builder
 }
 
-func newStream(body io.ReadCloser, ctx context.Context) *stream {
+// Interface compliance check.
+var _ pipe.Stream = (*stream)(nil)
+
+func newStream(ctx context.Context, body io.ReadCloser) *stream {
 	return &stream{
 		body:    body,
 		scanner: bufio.NewScanner(body),
@@ -276,10 +279,14 @@ func (s *stream) handleContentBlockStop(data string) (pipe.Event, error) {
 
 	switch bs.blockType {
 	case "tool_use":
+		raw := bs.inputBuf.String()
+		if raw == "" {
+			raw = "{}"
+		}
 		call := pipe.ToolCallBlock{
 			ID:        bs.toolID,
 			Name:      bs.toolName,
-			Arguments: json.RawMessage(bs.inputBuf.String()),
+			Arguments: json.RawMessage(raw),
 		}
 		s.msg.Content[evt.Index] = call
 		return pipe.EventToolCallEnd{Call: call}, nil

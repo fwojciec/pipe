@@ -74,7 +74,7 @@ func (c *Client) Stream(ctx context.Context, req pipe.Request) (pipe.Stream, err
 		return nil, parseHTTPError(resp)
 	}
 
-	return newStream(resp.Body, ctx), nil
+	return newStream(ctx, resp.Body), nil
 }
 
 func (c *Client) buildRequestBody(req pipe.Request) ([]byte, error) {

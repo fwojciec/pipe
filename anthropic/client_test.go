@@ -156,6 +156,85 @@ func TestClient_ToolResultMessagesMerged(t *testing.T) {
 	assert.Equal(t, "tc_2", block1["tool_use_id"])
 }
 
+func TestClient_ImageBlockConversion(t *testing.T) {
+	t.Parallel()
+
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+	s, err := client.Stream(context.Background(), pipe.Request{
+		Messages: []pipe.Message{
+			pipe.UserMessage{Content: []pipe.ContentBlock{
+				pipe.ImageBlock{Data: []byte("PNG"), MimeType: "image/png"},
+			}},
+		},
+	})
+	require.NoError(t, err)
+	defer s.Close()
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(captured, &body))
+
+	msgs := body["messages"].([]interface{})
+	msg0 := msgs[0].(map[string]interface{})
+	content := msg0["content"].([]interface{})
+	require.Len(t, content, 1)
+	block := content[0].(map[string]interface{})
+	assert.Equal(t, "image", block["type"])
+	source := block["source"].(map[string]interface{})
+	assert.Equal(t, "base64", source["type"])
+	assert.Equal(t, "image/png", source["media_type"])
+	assert.Equal(t, "UE5H", source["data"]) // base64 of "PNG"
+}
+
+func TestClient_ToolResultIsError(t *testing.T) {
+	t.Parallel()
+
+	var captured []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := anthropic.New("test-key", anthropic.WithBaseURL(srv.URL))
+	s, err := client.Stream(context.Background(), pipe.Request{
+		Messages: []pipe.Message{
+			pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			pipe.AssistantMessage{Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"rm -rf /"}`)},
+			}},
+			pipe.ToolResultMessage{
+				ToolCallID: "tc_1",
+				ToolName:   "bash",
+				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "permission denied"}},
+				IsError:    true,
+			},
+		},
+	})
+	require.NoError(t, err)
+	defer s.Close()
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(captured, &body))
+
+	msgs := body["messages"].([]interface{})
+	toolMsg := msgs[2].(map[string]interface{})
+	blocks := toolMsg["content"].([]interface{})
+	block := blocks[0].(map[string]interface{})
+	assert.Equal(t, "tool_result", block["type"])
+	assert.Equal(t, true, block["is_error"])
+}
+
 func TestClient_HTTPError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
