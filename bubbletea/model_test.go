@@ -62,6 +62,10 @@ func TestModel_Update(t *testing.T) {
 
 		m := initModel(t, nopAgent)
 
+		// Verify initial dimensions differ from resize target.
+		assert.Equal(t, 80, m.Viewport.Width)
+		assert.Equal(t, 20, m.Viewport.Height) // 24 - 1 - 1 - 2 = 20
+
 		// Send a second WindowSizeMsg with different dimensions.
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 		model, ok := updated.(bt.Model)

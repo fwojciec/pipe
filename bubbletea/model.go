@@ -14,6 +14,8 @@ import (
 	"github.com/fwojciec/pipe"
 )
 
+const inputHeight = 1
+
 // Model is the Bubble Tea model for the pipe TUI.
 type Model struct {
 	// Textarea is the text input component. Exported for test access.
@@ -40,7 +42,7 @@ func New(run AgentFunc, session *pipe.Session) Model {
 	ta.Focus()
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
-	ta.SetHeight(1)
+	ta.SetHeight(inputHeight)
 
 	return Model{
 		Textarea: ta,
@@ -144,7 +146,6 @@ func (m Model) View() string {
 }
 
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
-	inputHeight := 1
 	statusHeight := 1
 	borderHeight := 2 // newlines between sections
 	vpHeight := msg.Height - inputHeight - statusHeight - borderHeight
