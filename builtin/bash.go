@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/fwojciec/pipe"
@@ -58,6 +59,10 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", a.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -71,7 +76,7 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 
 	if err != nil {
 		return &pipe.ToolResult{
-			Content: []pipe.ContentBlock{pipe.TextBlock{Text: output + err.Error()}},
+			Content: []pipe.ContentBlock{pipe.TextBlock{Text: output + "\n" + err.Error()}},
 			IsError: true,
 		}, nil
 	}
