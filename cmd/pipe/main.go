@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fwojciec/pipe"
 	"github.com/fwojciec/pipe/agent"
 	"github.com/fwojciec/pipe/anthropic"
@@ -87,18 +86,12 @@ func run() error {
 
 	// Create and run TUI.
 	tuiModel := bt.New(agentFn, &session)
-	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 
 	// Handle OS signals for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	go func() {
-		<-ctx.Done()
-		p.Quit()
-	}()
-
-	if _, err := p.Run(); err != nil {
+	if err := bt.Run(ctx, tuiModel); err != nil {
 		return fmt.Errorf("TUI: %w", err)
 	}
 

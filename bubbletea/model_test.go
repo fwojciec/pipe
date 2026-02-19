@@ -209,7 +209,7 @@ func TestModel_Integration(t *testing.T) {
 		m = updated.(bt.Model)
 
 		// Type and submit.
-		m.Textarea.SetValue("hi")
+		m.Input.SetValue("hi")
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(bt.Model)
 
@@ -250,7 +250,7 @@ func TestModel_Integration(t *testing.T) {
 		m = updated.(bt.Model)
 
 		// Submit input.
-		m.Textarea.SetValue("hi")
+		m.Input.SetValue("hi")
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(bt.Model)
 		require.NotNil(t, cmd)

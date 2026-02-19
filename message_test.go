@@ -2,11 +2,13 @@ package pipe_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/fwojciec/pipe"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUserMessage_ImplementsMessage(t *testing.T) {
@@ -130,4 +132,158 @@ func TestContentBlockTypeSwitch_Exhaustive(t *testing.T) {
 			t.Fatalf("unexpected content block type: %T", block)
 		}
 	}
+}
+
+func TestValidateMessage_UserMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("image block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.UserMessage{Content: []pipe.ContentBlock{pipe.ImageBlock{Data: []byte{0x89}, MimeType: "image/png"}}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("tool call block is invalid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.UserMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "tc_1", Name: "read", Arguments: json.RawMessage(`{}`)},
+		}}
+		err := pipe.ValidateMessage(msg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pipe.ErrValidation))
+		assert.Contains(t, err.Error(), "ToolCallBlock")
+		assert.Contains(t, err.Error(), "user")
+	})
+
+	t.Run("thinking block is invalid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.UserMessage{Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "hmm"},
+		}}
+		err := pipe.ValidateMessage(msg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pipe.ErrValidation))
+		assert.Contains(t, err.Error(), "ThinkingBlock")
+		assert.Contains(t, err.Error(), "user")
+	})
+}
+
+func TestValidateMessage_AssistantMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.AssistantMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("tool call block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "tc_1", Name: "read", Arguments: json.RawMessage(`{}`)},
+		}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("thinking block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "reasoning..."},
+		}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("image block is invalid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ImageBlock{Data: []byte{0x89}, MimeType: "image/png"},
+		}}
+		err := pipe.ValidateMessage(msg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pipe.ErrValidation))
+		assert.Contains(t, err.Error(), "ImageBlock")
+		assert.Contains(t, err.Error(), "assistant")
+	})
+}
+
+func TestValidateMessage_ToolResultMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read", Content: []pipe.ContentBlock{pipe.TextBlock{Text: "contents"}}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("image block is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read", Content: []pipe.ContentBlock{
+			pipe.ImageBlock{Data: []byte{0x89}, MimeType: "image/png"},
+		}}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("tool call block is invalid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read", Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "tc_2", Name: "write", Arguments: json.RawMessage(`{}`)},
+		}}
+		err := pipe.ValidateMessage(msg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pipe.ErrValidation))
+		assert.Contains(t, err.Error(), "ToolCallBlock")
+		assert.Contains(t, err.Error(), "tool_result")
+	})
+
+	t.Run("thinking block is invalid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read", Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "hmm"},
+		}}
+		err := pipe.ValidateMessage(msg)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pipe.ErrValidation))
+		assert.Contains(t, err.Error(), "ThinkingBlock")
+		assert.Contains(t, err.Error(), "tool_result")
+	})
+}
+
+func TestValidateMessage_EmptyContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("user message with empty content is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.UserMessage{}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("assistant message with empty content is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.AssistantMessage{}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+
+	t.Run("tool result message with empty content is valid", func(t *testing.T) {
+		t.Parallel()
+		msg := pipe.ToolResultMessage{ToolCallID: "tc_1", ToolName: "read"}
+		assert.NoError(t, pipe.ValidateMessage(msg))
+	})
+}
+
+func TestValidateMessage_InvalidBlockAfterValidBlock(t *testing.T) {
+	t.Parallel()
+	msg := pipe.UserMessage{Content: []pipe.ContentBlock{
+		pipe.TextBlock{Text: "hello"},
+		pipe.ToolCallBlock{ID: "tc_1", Name: "read", Arguments: json.RawMessage(`{}`)},
+	}}
+	err := pipe.ValidateMessage(msg)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, pipe.ErrValidation))
+	assert.Contains(t, err.Error(), "ToolCallBlock")
 }

@@ -7,19 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fwojciec/pipe"
 )
 
-const inputHeight = 1
-
 // Model is the Bubble Tea model for the pipe TUI.
 type Model struct {
-	// Textarea is the text input component. Exported for test access.
-	Textarea textarea.Model
+	// Input is the text input component. Exported for test access.
+	Input textinput.Model
 	// Viewport is the scrollable output area. Exported for test access.
 	Viewport viewport.Model
 
@@ -37,18 +35,16 @@ type Model struct {
 
 // New creates a new TUI Model with the given agent function and session.
 func New(run AgentFunc, session *pipe.Session) Model {
-	ta := textarea.New()
-	ta.Placeholder = "Type a message..."
-	ta.Focus()
-	ta.ShowLineNumbers = false
-	ta.CharLimit = 0
-	ta.SetHeight(inputHeight)
+	ti := textinput.New()
+	ti.Placeholder = "Type a message..."
+	ti.Focus()
+	ti.CharLimit = 0
 
 	return Model{
-		Textarea: ta,
-		run:      run,
-		session:  session,
-		output:   &strings.Builder{},
+		Input:   ti,
+		run:     run,
+		session: session,
+		output:  &strings.Builder{},
 	}
 }
 
@@ -74,7 +70,7 @@ func SetRunningWithCancel(m Model, cancel func()) (Model, tea.Cmd) {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return textarea.Blink
+	return textinput.Blink
 }
 
 // Update implements tea.Model.
@@ -106,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.err = msg.Err
 		}
-		cmd := m.Textarea.Focus()
+		cmd := m.Input.Focus()
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
@@ -118,7 +114,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Viewport, cmd = m.Viewport.Update(msg)
 		cmds = append(cmds, cmd)
 	} else {
-		m.Textarea, cmd = m.Textarea.Update(msg)
+		m.Input, cmd = m.Input.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -142,12 +138,13 @@ func (m Model) View() string {
 	b.WriteString("\n")
 
 	// Input area.
-	b.WriteString(m.Textarea.View())
+	b.WriteString(m.Input.View())
 
 	return b.String()
 }
 
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
+	inputHeight := 1
 	statusHeight := 1
 	borderHeight := 2 // newlines between sections
 	vpHeight := msg.Height - inputHeight - statusHeight - borderHeight
@@ -164,7 +161,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 		m.Viewport.Height = vpHeight
 	}
 
-	m.Textarea.SetWidth(msg.Width)
+	m.Input.Width = msg.Width
 	return m
 }
 
@@ -183,17 +180,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.running {
 			return m, nil
 		}
-		text := strings.TrimSpace(m.Textarea.Value())
+		text := strings.TrimSpace(m.Input.Value())
 		if text == "" {
 			return m, nil
 		}
 		return m.submitInput(text)
 	}
 
-	// Pass key to textarea when not running.
+	// Pass key to input when not running.
 	if !m.running {
 		var cmd tea.Cmd
-		m.Textarea, cmd = m.Textarea.Update(msg)
+		m.Input, cmd = m.Input.Update(msg)
 		return m, cmd
 	}
 
@@ -201,7 +198,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
-	m.Textarea.Reset()
+	m.Input.SetValue("")
 	m.err = nil
 
 	// Append user message to session.
@@ -223,7 +220,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	m.doneCh = make(chan error, 1)
 	m.running = true
 
-	m.Textarea.Blur()
+	m.Input.Blur()
 
 	return m, tea.Batch(
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
