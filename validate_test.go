@@ -280,3 +280,15 @@ func TestValidateMessage_EmptyContent(t *testing.T) {
 		assert.NoError(t, pipe.ValidateMessage(msg))
 	})
 }
+
+func TestValidateMessage_InvalidBlockAfterValidBlock(t *testing.T) {
+	t.Parallel()
+	msg := pipe.UserMessage{Content: []pipe.ContentBlock{
+		pipe.TextBlock{Text: "hello"},
+		pipe.ToolCallBlock{ID: "tc_1", Name: "read", Arguments: json.RawMessage(`{}`)},
+	}}
+	err := pipe.ValidateMessage(msg)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, pipe.ErrValidation))
+	assert.Contains(t, err.Error(), "ToolCallBlock")
+}

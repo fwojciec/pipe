@@ -11,7 +11,7 @@ func (r Request) Validate() error {
 		}
 	}
 	if r.MaxTokens < 0 {
-		return fmt.Errorf("max_tokens must be > 0 if set, got %d: %w", r.MaxTokens, ErrValidation)
+		return fmt.Errorf("max_tokens must be non-negative, got %d: %w", r.MaxTokens, ErrValidation)
 	}
 	return nil
 }
@@ -25,8 +25,9 @@ func ValidateMessage(msg Message) error {
 		return validateBlocks(m.Content, m.Role(), allowText|allowThinking|allowToolCall)
 	case ToolResultMessage:
 		return validateBlocks(m.Content, m.Role(), allowText|allowImage)
+	default:
+		return fmt.Errorf("unknown message type %T: %w", msg, ErrValidation)
 	}
-	return nil
 }
 
 type blockAllow uint8
@@ -57,6 +58,8 @@ func validateBlocks(blocks []ContentBlock, role Role, allowed blockAllow) error 
 			if allowed&allowToolCall == 0 {
 				return fmt.Errorf("ToolCallBlock not allowed in %s message: %w", role, ErrValidation)
 			}
+		default:
+			return fmt.Errorf("unknown content block type %T in %s message: %w", b, role, ErrValidation)
 		}
 	}
 	return nil
