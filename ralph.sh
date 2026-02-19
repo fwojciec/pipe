@@ -95,10 +95,14 @@ while :; do
             end
         ' 2>/dev/null
     claude_exit=${PIPESTATUS[0]}
+    jq_exit=${PIPESTATUS[2]}
     set -e
 
     if [ "$claude_exit" -ne 0 ]; then
         echo "WARNING: Claude exited with code $claude_exit" | tee -a "$LOGFILE"
+    fi
+    if [ "$jq_exit" -ne 0 ]; then
+        echo "WARNING: jq stream processing exited with code $jq_exit" | tee -a "$LOGFILE"
     fi
 
     # Check if signaled complete
