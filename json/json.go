@@ -77,6 +77,9 @@ func UnmarshalSession(data []byte) (pipe.Session, error) {
 	if err := json.Unmarshal(data, &env); err != nil {
 		return pipe.Session{}, fmt.Errorf("unmarshal envelope: %w", err)
 	}
+	if env.Version != 1 {
+		return pipe.Session{}, fmt.Errorf("unsupported envelope version: %d", env.Version)
+	}
 	msgs := make([]pipe.Message, len(env.Messages))
 	for i, dto := range env.Messages {
 		msg, err := unmarshalMessage(dto)
@@ -100,11 +103,15 @@ func Save(path string, s pipe.Session) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create directories: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write file: %w", err)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil
 }

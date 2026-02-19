@@ -365,6 +365,20 @@ func TestUnmarshalSession_UnknownContentBlockType(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestUnmarshalSession_UnsupportedVersion(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{
+		"version": 99,
+		"id": "test",
+		"created_at": "2026-02-18T12:00:00Z",
+		"updated_at": "2026-02-18T12:00:00Z",
+		"messages": []
+	}`)
+	_, err := pipejson.UnmarshalSession(data)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported envelope version")
+}
+
 func TestMarshalSession_ImageBase64Encoding(t *testing.T) {
 	t.Parallel()
 	imgData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A} // PNG header bytes
