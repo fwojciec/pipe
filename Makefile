@@ -18,7 +18,7 @@ lint: ## Run golangci-lint
 
 ## Formatting
 fmt: ## Check formatting (fails if files need formatting)
-	@test -z "$$(gofmt -l ./...)" || (echo "Files need formatting:"; gofmt -l ./...; exit 1)
+	@output=$$(gofmt -l ./...); test -z "$$output" || (echo "Files need formatting:"; echo "$$output"; exit 1)
 
 ## Vet
 vet: ## Run go vet
