@@ -165,8 +165,14 @@ type EventToolCallEnd struct{ Call ToolCallBlock }
 // Streaming
 //
 // Stream uses a pull-based iterator pattern. Cancellation flows through the
-// context passed to Provider.Stream(). Message() returns an error if called
-// before Next() returns io.EOF.
+// context passed to Provider.Stream().
+//
+// Message() returns the assembled AssistantMessage at any point:
+// - After io.EOF: complete message, nil error.
+// - After non-EOF error: partial message (what was assembled before failure),
+//   nil error. StopReason will be StopError. Partial output is recoverable
+//   for debugging/retry UX.
+// - Before Next() is ever called: zero-value message, non-nil error.
 type Stream interface {
     Next() (Event, error)
     Message() (AssistantMessage, error)
@@ -186,6 +192,10 @@ type Request struct {
     MaxTokens    int          // 0 = provider default
     Temperature  *float64     // nil = provider default
 }
+
+// Validate checks universal constraints on Request.
+// Provider implementations may apply additional provider-specific validation.
+func (r *Request) Validate() error
 
 // Tools
 //
@@ -233,6 +243,8 @@ pipe/
 ├── tool.go                 # Tool, ToolExecutor, ToolResult
 ├── session.go              # Session
 ├── usage.go                # Usage, StopReason
+├── json/                   # Session persistence (dep: encoding/json)
+│   └── session.go          # Save/Load with v1 envelope format
 ├── anthropic/              # Provider impl (dep: net/http for SSE)
 │   ├── client.go
 │   └── stream.go
@@ -254,12 +266,67 @@ pipe/
     └── main.go             # Composition root
 ```
 
+## Persistence Schema (v1)
+
+Session files use JSON with type discriminators on polymorphic types. Version field
+at the envelope level for forward compatibility.
+
+```json
+{
+  "version": 1,
+  "id": "session-id",
+  "system_prompt": "You are...",
+  "created_at": "2026-02-18T12:00:00Z",
+  "updated_at": "2026-02-18T12:05:00Z",
+  "messages": [
+    {
+      "type": "user",
+      "content": [
+        {"type": "text", "text": "Fix the login bug"}
+      ],
+      "timestamp": "2026-02-18T12:00:00Z"
+    },
+    {
+      "type": "assistant",
+      "content": [
+        {"type": "text", "text": "I'll look at the auth module."},
+        {"type": "tool_call", "id": "tc_1", "name": "read", "arguments": {"path": "auth.go"}}
+      ],
+      "stop_reason": "tool_use",
+      "raw_stop_reason": "tool_use",
+      "usage": {"input_tokens": 150, "output_tokens": 42},
+      "timestamp": "2026-02-18T12:00:01Z"
+    },
+    {
+      "type": "tool_result",
+      "tool_call_id": "tc_1",
+      "tool_name": "read",
+      "content": [
+        {"type": "text", "text": "package auth\n..."}
+      ],
+      "is_error": false,
+      "timestamp": "2026-02-18T12:00:02Z"
+    }
+  ]
+}
+```
+
+Persistence implementation lives in a `json/` subpackage (per Ben Johnson: named
+after the dependency `encoding/json`). The root package defines the domain types;
+the `json/` package provides `Save()`/`Load()` with format conversion.
+
+## Validation
+
+- **`Request.Validate()`**: Universal constraints in root package. Temperature must
+  be in [0, 2] if set. MaxTokens must be > 0 if set. Provider adds its own
+  validation on top (e.g. model ID must be recognized).
+- **Content block combinations**: Validated at construction/use time via a
+  `ValidateMessage()` function in root, not at the type level.
+
 ## Review Notes
 
-Based on code review feedback, the following items are deferred to implementation:
+Items deferred to implementation:
 
-- **Persistence schema**: Versioned, tagged wire format with type discriminators
-  for Message and ContentBlock. Define when implementing session persistence.
 - **Content block validation**: Enforce valid combinations (e.g. no ToolCallBlock
   in UserMessage) at construction/use time, not at the type level.
 - **ImageBlock sizing**: Define max sizes and/or external blob references when
