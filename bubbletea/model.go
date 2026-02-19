@@ -239,7 +239,7 @@ func (m *Model) processEvent(evt pipe.Event) {
 		// Show thinking inline for MVP.
 		m.output.WriteString(e.Delta)
 	case pipe.EventToolCallBegin:
-		m.output.WriteString(fmt.Sprintf("\n--- tool: %s ---\n", e.Name))
+		fmt.Fprintf(m.output, "\n--- tool: %s ---\n", e.Name)
 	case pipe.EventToolCallDelta:
 		// Skip partial JSON arguments.
 	case pipe.EventToolCallEnd:
