@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -128,13 +129,15 @@ func loadOrCreateSession(sessionPath, promptPath string) (pipe.Session, error) {
 		return s, nil
 	}
 
-	// Load system prompt. Fail on explicit paths; tolerate missing default.
+	// Load system prompt. Tolerate missing default; fail on all other errors.
 	systemPrompt := "You are a helpful coding assistant."
 	data, err := os.ReadFile(promptPath)
 	switch {
 	case err == nil:
 		systemPrompt = string(data)
-	case promptPath != defaultPromptPath:
+	case errors.Is(err, os.ErrNotExist) && promptPath == defaultPromptPath:
+		// Default prompt file doesn't exist; use built-in default.
+	default:
 		return pipe.Session{}, fmt.Errorf("read system prompt: %w", err)
 	}
 
