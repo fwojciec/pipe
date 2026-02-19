@@ -100,11 +100,44 @@ func TestExecutor(t *testing.T) {
 		assert.Contains(t, text.Text, "nonexistent")
 	})
 
+	t.Run("dispatches grep tool", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.txt")
+		require.NoError(t, os.WriteFile(path, []byte("findme\n"), 0o644))
+
+		exec := builtin.NewExecutor()
+		args, _ := json.Marshal(map[string]any{"pattern": "findme", "path": dir})
+		result, err := exec.Execute(context.Background(), "grep", args)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Contains(t, text.Text, "findme")
+	})
+
+	t.Run("dispatches glob tool", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.go"), []byte(""), 0o644))
+
+		exec := builtin.NewExecutor()
+		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
+		result, err := exec.Execute(context.Background(), "glob", args)
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Contains(t, text.Text, "test.go")
+	})
+
 	t.Run("Tools returns all tool definitions", func(t *testing.T) {
 		t.Parallel()
 		exec := builtin.NewExecutor()
 		tools := exec.Tools()
-		assert.Len(t, tools, 4)
+		assert.Len(t, tools, 6)
 
 		names := make(map[string]bool)
 		for _, tool := range tools {
@@ -114,5 +147,7 @@ func TestExecutor(t *testing.T) {
 		assert.True(t, names["read"])
 		assert.True(t, names["write"])
 		assert.True(t, names["edit"])
+		assert.True(t, names["grep"])
+		assert.True(t, names["glob"])
 	})
 }

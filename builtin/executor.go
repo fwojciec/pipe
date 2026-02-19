@@ -31,6 +31,10 @@ func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessag
 		return ExecuteWrite(ctx, args)
 	case "edit":
 		return ExecuteEdit(ctx, args)
+	case "grep":
+		return ExecuteGrep(ctx, args)
+	case "glob":
+		return ExecuteGlob(ctx, args)
 	default:
 		return &pipe.ToolResult{
 			Content: []pipe.ContentBlock{pipe.TextBlock{Text: fmt.Sprintf("unknown tool: %s", name)}},
@@ -46,5 +50,7 @@ func (e *Executor) Tools() []pipe.Tool {
 		ReadTool(),
 		WriteTool(),
 		EditTool(),
+		GrepTool(),
+		GlobTool(),
 	}
 }
