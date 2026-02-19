@@ -25,6 +25,7 @@ type RunOption func(*runConfig)
 
 type runConfig struct {
 	onEvent func(pipe.Event)
+	model   string
 }
 
 // WithEventHandler sets a callback that receives each streaming event during
@@ -32,6 +33,14 @@ type runConfig struct {
 func WithEventHandler(h func(pipe.Event)) RunOption {
 	return func(c *runConfig) {
 		c.onEvent = h
+	}
+}
+
+// WithModel sets the model ID for provider requests during this run.
+// Empty string means the provider uses its default model.
+func WithModel(model string) RunOption {
+	return func(c *runConfig) {
+		c.model = model
 	}
 }
 
@@ -44,7 +53,7 @@ func (l *Loop) Run(ctx context.Context, session *pipe.Session, tools []pipe.Tool
 		opt(&cfg)
 	}
 	for {
-		cont, err := l.turn(ctx, session, tools, cfg.onEvent)
+		cont, err := l.turn(ctx, session, tools, &cfg)
 		if err != nil {
 			return err
 		}
@@ -56,12 +65,13 @@ func (l *Loop) Run(ctx context.Context, session *pipe.Session, tools []pipe.Tool
 
 // turn executes a single turn of the conversation loop. It returns true if the
 // loop should continue (tool calls were made), false if it should stop.
-func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Tool, onEvent func(pipe.Event)) (bool, error) {
+func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Tool, cfg *runConfig) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 
 	req := pipe.Request{
+		Model:        cfg.model,
 		SystemPrompt: session.SystemPrompt,
 		Messages:     session.Messages,
 		Tools:        tools,
@@ -84,8 +94,8 @@ func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Too
 			streamErr = err
 			break
 		}
-		if onEvent != nil {
-			onEvent(evt)
+		if cfg.onEvent != nil {
+			cfg.onEvent(evt)
 		}
 	}
 

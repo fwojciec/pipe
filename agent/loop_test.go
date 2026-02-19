@@ -443,6 +443,35 @@ func TestLoop_Run(t *testing.T) {
 		require.Len(t, capturedReq.Messages, 1)
 	})
 
+	t.Run("WithModel sets model in request", func(t *testing.T) {
+		t.Parallel()
+
+		var capturedReq pipe.Request
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, req pipe.Request) (pipe.Stream, error) {
+				capturedReq = req
+				msg := pipe.AssistantMessage{
+					Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "ok"}},
+					StopReason: pipe.StopEndTurn,
+				}
+				return completedStream(msg), nil
+			},
+		}
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return nil, nil
+			},
+		}
+
+		session := &pipe.Session{}
+		loop := agent.New(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, agent.WithModel("claude-sonnet-4-20250514"))
+		require.NoError(t, err)
+
+		assert.Equal(t, "claude-sonnet-4-20250514", capturedReq.Model)
+	})
+
 	t.Run("event handler receives stream events", func(t *testing.T) {
 		t.Parallel()
 
