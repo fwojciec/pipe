@@ -16,10 +16,32 @@ Strategic guidance for LLMs working with this codebase.
 - **Single agent** - human is the orchestrator; the agent executes
 - **Self-extending** - the tool can be used to improve itself
 
-## Quick Reference
+## Workflows
+
+| Command | Purpose |
+|---------|---------|
+| `/work [issue-number]` | Pick issue, branch, implement with TDD, review, PR |
+| `/ralph <milestone>` | One iteration of Ralph loop: next issue, implement, merge |
+| `./ralph.sh "<milestone>"` | Autonomous loop: runs `/ralph` until milestone complete |
+| `/gh-workflow` | GitHub issue/milestone/PR management |
 
 ```bash
 make validate     # Quality gate - run before completing any task
+./ralph.sh "v0.1" # Autonomous milestone execution
+```
+
+Issues within milestones are executed sequentially by issue number (ascending).
+Create issues in the order they should be implemented.
+
+## Code Review
+
+[roborev](https://www.roborev.io/) handles all code review. Integrated into `/work`
+and `/ralph` workflows automatically.
+
+```bash
+roborev review --wait            # Review HEAD commit, block until done
+roborev review --branch --wait   # Review all branch changes
+roborev fix                      # Auto-fix review findings
 ```
 
 ## Architecture Patterns
@@ -70,6 +92,15 @@ golangci-lint enforces:
 - Separate test packages (`testpackage`)
 - Error checking (`errcheck`) - all errors must be handled
 - HTTP body close (`bodyclose`) - critical for streaming
+
+## Skills
+
+| Skill | Use when |
+|-------|----------|
+| `work` | Interactive single-issue development |
+| `ralph` | Autonomous iteration within Ralph loop |
+| `gh-workflow` | Any GitHub issue/milestone/PR management |
+| `go-standard-package-layout` | Deciding where code belongs |
 
 ## Reference Documentation
 
