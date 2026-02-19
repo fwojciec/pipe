@@ -89,10 +89,8 @@ is lost when providers add new stop reasons.
 
 ### Session
 
-Minimal: ID, messages, system prompt, timestamps. Persistence lives in a subpackage.
-Serialization requires a versioned, tagged wire format with type discriminators for
-polymorphic interfaces (`Message`, `ContentBlock`). This will be defined when
-implementing persistence.
+Minimal: ID, messages, system prompt, timestamps. Persistence lives in a `json/`
+subpackage. See Persistence Schema (v1) section below for the versioned wire format.
 
 ## Types
 
@@ -175,8 +173,9 @@ type EventToolCallEnd struct{ Call ToolCallBlock }
 // - Mid-stream (some deltas received, no terminal state): partial message,
 //   nil error. Content reflects deltas received so far.
 // - Before Next() is ever called: zero-value message, non-nil error.
-// - After Close(): same as last terminal state (EOF or error). If Close()
-//   is called mid-stream, subsequent Next() calls return an error.
+// - After Close(): if a terminal state was reached, same as that state.
+//   If Close() is called mid-stream, message is partial with
+//   StopReason = StopAborted. Subsequent Next() calls return error.
 type Stream interface {
     Next() (Event, error)
     Message() (AssistantMessage, error)
