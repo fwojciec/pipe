@@ -1,4 +1,4 @@
-package exec
+package command
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	osexec "os/exec"
+	"os/exec"
 	"syscall"
 	"time"
 
@@ -59,7 +59,7 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := osexec.CommandContext(ctx, "bash", "-c", a.Command)
+	cmd := exec.CommandContext(ctx, "bash", "-c", a.Command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -75,7 +75,7 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 		// If the process exited on its own with a non-zero exit code, report that
 		// even if the context also expired around the same time. A process killed
 		// by our cancellation signal has ExitCode() == -1.
-		var exitErr *osexec.ExitError
+		var exitErr *exec.ExitError
 		isRealExit := errors.As(err, &exitErr) && exitErr.ExitCode() >= 0
 		if !isRealExit && ctx.Err() != nil {
 			return domainError(fmt.Sprintf("command timed out or cancelled: %s\n%s", ctx.Err(), output)), nil
