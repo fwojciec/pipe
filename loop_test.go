@@ -1,4 +1,4 @@
-package agent_test
+package pipe_test
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/agent"
 	"github.com/fwojciec/pipe/mock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,7 +52,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{SystemPrompt: "you are helpful"}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -85,7 +84,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -135,7 +134,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{SystemPrompt: "test"}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -202,7 +201,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -253,7 +252,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -305,7 +304,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -345,7 +344,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		assert.ErrorIs(t, err, streamErr)
@@ -372,7 +371,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		assert.ErrorIs(t, err, providerErr)
@@ -397,7 +396,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(ctx, session, nil)
 		assert.ErrorIs(t, err, context.Canceled)
@@ -432,7 +431,7 @@ func TestLoop_Run(t *testing.T) {
 				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "hi"}}},
 			},
 		}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, tools)
 		require.NoError(t, err)
@@ -464,9 +463,9 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
-		err := loop.Run(context.Background(), session, nil, agent.WithModel("claude-sonnet-4-20250514"))
+		err := loop.Run(context.Background(), session, nil, pipe.WithModel("claude-sonnet-4-20250514"))
 		require.NoError(t, err)
 
 		assert.Equal(t, "claude-sonnet-4-20250514", capturedReq.Model)
@@ -515,9 +514,9 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
-		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(handler))
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
 		require.NoError(t, err)
 
 		assert.Equal(t, events, received)
@@ -543,7 +542,7 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)
@@ -570,9 +569,9 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
-		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(nil))
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(nil))
 		require.NoError(t, err)
 		require.Len(t, session.Messages, 1)
 	})
@@ -649,9 +648,9 @@ func TestLoop_Run(t *testing.T) {
 		}
 
 		session := &pipe.Session{}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
-		err := loop.Run(context.Background(), session, nil, agent.WithEventHandler(handler))
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
 		require.NoError(t, err)
 
 		allExpected := slices.Concat(turn1Events, turn2Events)
@@ -698,7 +697,7 @@ func TestLoop_Run(t *testing.T) {
 				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "run it"}}},
 			},
 		}
-		loop := agent.New(provider, executor)
+		loop := pipe.NewLoop(provider, executor)
 
 		err := loop.Run(context.Background(), session, nil)
 		require.NoError(t, err)

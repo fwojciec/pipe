@@ -1,22 +1,19 @@
-// Package agent orchestrates the conversation loop between a Provider and a ToolExecutor.
-package agent
+package pipe
 
 import (
 	"context"
 	"io"
 	"time"
-
-	"github.com/fwojciec/pipe"
 )
 
 // Loop orchestrates the conversation between a Provider and a ToolExecutor.
 type Loop struct {
-	provider pipe.Provider
-	executor pipe.ToolExecutor
+	provider Provider
+	executor ToolExecutor
 }
 
-// New creates a new Loop with the given provider and tool executor.
-func New(provider pipe.Provider, executor pipe.ToolExecutor) *Loop {
+// NewLoop creates a new Loop with the given provider and tool executor.
+func NewLoop(provider Provider, executor ToolExecutor) *Loop {
 	return &Loop{provider: provider, executor: executor}
 }
 
@@ -24,13 +21,13 @@ func New(provider pipe.Provider, executor pipe.ToolExecutor) *Loop {
 type RunOption func(*runConfig)
 
 type runConfig struct {
-	onEvent func(pipe.Event)
+	onEvent func(Event)
 	model   string
 }
 
 // WithEventHandler sets a callback that receives each streaming event during
 // the run. If nil or not set, events are silently discarded.
-func WithEventHandler(h func(pipe.Event)) RunOption {
+func WithEventHandler(h func(Event)) RunOption {
 	return func(c *runConfig) {
 		c.onEvent = h
 	}
@@ -47,7 +44,7 @@ func WithModel(model string) RunOption {
 // Run executes the agent loop. It sends the session's messages to the provider,
 // streams the response, executes any tool calls, and repeats until the assistant
 // stops requesting tools. It appends all messages to session.Messages.
-func (l *Loop) Run(ctx context.Context, session *pipe.Session, tools []pipe.Tool, opts ...RunOption) error {
+func (l *Loop) Run(ctx context.Context, session *Session, tools []Tool, opts ...RunOption) error {
 	var cfg runConfig
 	for _, opt := range opts {
 		opt(&cfg)
@@ -65,12 +62,12 @@ func (l *Loop) Run(ctx context.Context, session *pipe.Session, tools []pipe.Tool
 
 // turn executes a single turn of the conversation loop. It returns true if the
 // loop should continue (tool calls were made), false if it should stop.
-func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Tool, cfg *runConfig) (bool, error) {
+func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *runConfig) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 
-	req := pipe.Request{
+	req := Request{
 		Model:        cfg.model,
 		SystemPrompt: session.SystemPrompt,
 		Messages:     session.Messages,
@@ -116,9 +113,9 @@ func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Too
 	}
 
 	// Extract tool calls from the response.
-	var toolCalls []pipe.ToolCallBlock
+	var toolCalls []ToolCallBlock
 	for _, block := range msg.Content {
-		if tc, ok := block.(pipe.ToolCallBlock); ok {
+		if tc, ok := block.(ToolCallBlock); ok {
 			toolCalls = append(toolCalls, tc)
 		}
 	}
@@ -131,13 +128,13 @@ func (l *Loop) turn(ctx context.Context, session *pipe.Session, tools []pipe.Too
 	for _, tc := range toolCalls {
 		result, execErr := l.executor.Execute(ctx, tc.Name, tc.Arguments)
 		if execErr != nil {
-			result = &pipe.ToolResult{
-				Content: []pipe.ContentBlock{pipe.TextBlock{Text: execErr.Error()}},
+			result = &ToolResult{
+				Content: []ContentBlock{TextBlock{Text: execErr.Error()}},
 				IsError: true,
 			}
 		}
 
-		trm := pipe.ToolResultMessage{
+		trm := ToolResultMessage{
 			ToolCallID: tc.ID,
 			ToolName:   tc.Name,
 			Content:    result.Content,

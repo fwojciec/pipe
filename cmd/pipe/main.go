@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/agent"
 	"github.com/fwojciec/pipe/anthropic"
 	bt "github.com/fwojciec/pipe/bubbletea"
 	pipejson "github.com/fwojciec/pipe/json"
@@ -71,14 +70,14 @@ func run() error {
 	toolDefs := tools()
 
 	// Create agent loop.
-	loop := agent.New(provider, exec)
+	loop := pipe.NewLoop(provider, exec)
 
 	// Build agent function closure for the TUI.
 	modelID := *model
 	agentFn := func(ctx context.Context, s *pipe.Session, onEvent func(pipe.Event)) error {
-		opts := []agent.RunOption{agent.WithEventHandler(onEvent)}
+		opts := []pipe.RunOption{pipe.WithEventHandler(onEvent)}
 		if modelID != "" {
-			opts = append(opts, agent.WithModel(modelID))
+			opts = append(opts, pipe.WithModel(modelID))
 		}
 		return loop.Run(ctx, s, toolDefs, opts...)
 	}
