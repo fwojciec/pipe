@@ -49,7 +49,7 @@ roborev fix                      # Auto-fix review findings
 **Ben Johnson Pattern**:
 - Root package (`pipe`): domain types and interfaces only (no external dependencies)
 - Subdirectories: one per external dependency (`anthropic/`, `bubbletea/`)
-- Capability packages: `builtin/` (tools), `agent/` (loop), `mock/` (testing)
+- Capability packages: `shell/` (bash tool), `fs/` (filesystem tools), `agent/` (loop), `mock/` (testing)
 - `cmd/pipe/`: wires everything together
 
 **File Naming Convention**:
