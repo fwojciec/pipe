@@ -18,11 +18,16 @@ type AgentFunc func(ctx context.Context, session *pipe.Session, onEvent func(pip
 // program quits.
 func Run(ctx context.Context, m Model) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	done := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		p.Quit()
+		select {
+		case <-ctx.Done():
+			p.Quit()
+		case <-done:
+		}
 	}()
 	_, err := p.Run()
+	close(done)
 	return err
 }
 
