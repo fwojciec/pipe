@@ -6,7 +6,7 @@ validate: fmt vet tidy lint test ## Run all validation checks
 
 ## Build
 build: ## Build the CLI
-	go build -o bin/pipe ./cmd/pipe
+	go build -o pipe ./cmd/pipe
 
 ## Testing
 test: ## Run tests with race detector
