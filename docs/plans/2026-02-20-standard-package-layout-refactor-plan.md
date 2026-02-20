@@ -175,7 +175,7 @@ go list ./...
 10. `fs/edit_test.go` (new)
 11. `fs/grep_test.go` (new)
 12. `fs/glob_test.go` (new)
-13. `builtin/*` (removed after migration)
+13. `builtin/bash.go`, `builtin/bash_test.go`, `builtin/read.go`, `builtin/read_test.go`, `builtin/write.go`, `builtin/write_test.go`, `builtin/edit.go`, `builtin/edit_test.go`, `builtin/grep.go`, `builtin/grep_test.go`, `builtin/glob.go`, `builtin/glob_test.go`, `builtin/builtin.go` (removed after migration — `builtin/executor.go` and `builtin/executor_test.go` remain until Phase 3)
 
 ### Exit Criteria
 
@@ -252,7 +252,7 @@ go list ./...
 - `mock/stream.go`: `Stream`
 
 3. Rename `mock/tool.go` to `mock/tool_executor.go`.
-4. Keep compile-time interface checks adjacent to each concrete mock type.
+4. Move compile-time interface assertions (`var _ pipe.X = ...`) from `mock/mock_test.go` into the production file for each concrete type (e.g., `mock/provider.go`, `mock/stream.go`, `mock/tool_executor.go`).
 
 ### Files
 
