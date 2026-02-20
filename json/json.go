@@ -47,8 +47,10 @@ type contentBlock struct {
 }
 
 type usageDTO struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 // MarshalSession serializes a Session to JSON in v1 envelope format.
@@ -150,7 +152,7 @@ func marshalMessage(msg pipe.Message) (messageDTO, error) {
 			Timestamp:     m.Timestamp,
 			StopReason:    &sr,
 			RawStopReason: &m.RawStopReason,
-			Usage:         &usageDTO{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens},
+			Usage:         &usageDTO{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens, CacheReadTokens: m.Usage.CacheReadTokens, CacheWriteTokens: m.Usage.CacheWriteTokens},
 		}, nil
 	case pipe.ToolResultMessage:
 		blocks, err := marshalContentBlocks(m.Content)
@@ -192,7 +194,7 @@ func unmarshalMessage(dto messageDTO) (pipe.Message, error) {
 		}
 		var usage pipe.Usage
 		if dto.Usage != nil {
-			usage = pipe.Usage{InputTokens: dto.Usage.InputTokens, OutputTokens: dto.Usage.OutputTokens}
+			usage = pipe.Usage{InputTokens: dto.Usage.InputTokens, OutputTokens: dto.Usage.OutputTokens, CacheReadTokens: dto.Usage.CacheReadTokens, CacheWriteTokens: dto.Usage.CacheWriteTokens}
 		}
 		return pipe.AssistantMessage{
 			Content:       blocks,

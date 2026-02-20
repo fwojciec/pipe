@@ -410,6 +410,107 @@ func TestMarshalSession_ImageBase64Encoding(t *testing.T) {
 	assert.Equal(t, "image/png", img.MimeType)
 }
 
+func TestMarshalSession_CacheUsageRoundTrip(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "cache-usage",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "cached response"}},
+				StopReason: pipe.StopEndTurn,
+				Usage: pipe.Usage{
+					InputTokens:      100,
+					OutputTokens:     50,
+					CacheReadTokens:  200,
+					CacheWriteTokens: 300,
+				},
+				Timestamp: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, 100, am.Usage.InputTokens)
+	assert.Equal(t, 50, am.Usage.OutputTokens)
+	assert.Equal(t, 200, am.Usage.CacheReadTokens)
+	assert.Equal(t, 300, am.Usage.CacheWriteTokens)
+}
+
+func TestUnmarshalSession_BackwardCompatNoCacheFields(t *testing.T) {
+	t.Parallel()
+	// Old JSON without cache_read_tokens and cache_write_tokens
+	data := []byte(`{
+		"version": 1,
+		"id": "old-session",
+		"system_prompt": "",
+		"created_at": "2026-02-18T12:00:00Z",
+		"updated_at": "2026-02-18T12:00:00Z",
+		"messages": [
+			{
+				"type": "assistant",
+				"content": [{"type": "text", "text": "hello"}],
+				"stop_reason": "end_turn",
+				"raw_stop_reason": "end_turn",
+				"usage": {"input_tokens": 10, "output_tokens": 5},
+				"timestamp": "2026-02-18T12:00:00Z"
+			}
+		]
+	}`)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	assert.Equal(t, 10, am.Usage.InputTokens)
+	assert.Equal(t, 5, am.Usage.OutputTokens)
+	assert.Equal(t, 0, am.Usage.CacheReadTokens)
+	assert.Equal(t, 0, am.Usage.CacheWriteTokens)
+}
+
+func TestMarshalSession_CacheUsageOmitsZeroFields(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "no-cache",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "hello"}},
+				StopReason: pipe.StopEndTurn,
+				Usage:      pipe.Usage{InputTokens: 10, OutputTokens: 5},
+				Timestamp:  time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	// Parse the raw JSON to check cache fields are absent
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	var msgs []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw["messages"], &msgs))
+	require.Len(t, msgs, 1)
+	var usage map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(msgs[0]["usage"], &usage))
+
+	assert.NotContains(t, usage, "cache_read_tokens")
+	assert.NotContains(t, usage, "cache_write_tokens")
+}
+
 func TestMarshalSession_ToolCallComplexArguments(t *testing.T) {
 	t.Parallel()
 	complexArgs := json.RawMessage(`{"nested":{"key":"value"},"array":[1,2,3],"bool":true}`)
