@@ -192,7 +192,7 @@ The loop will retry this issue on the next iteration with improved context.
 
 ## Phase 5: Complete
 
-### 5.1 Final Commit
+### 5.1 Commit and Validate
 
 ```bash
 git add .
@@ -206,6 +206,7 @@ Closes #<issue-number>
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
 )"
+make validate
 ```
 
 ### 5.2 Merge to Main
