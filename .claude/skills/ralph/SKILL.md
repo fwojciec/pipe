@@ -123,15 +123,31 @@ git add .
 
 ### 4.3 Run Roborev Review
 
+Run this command exactly once. Do NOT re-run it, do NOT wrap it with `2>&1`,
+`echo $?`, or any other shell constructs. Each invocation submits a new paid
+review. If the output is confusing, proceed to 4.4 to check results separately.
+
 ```bash
 roborev review --wait
 ```
 
 ### 4.4 Handle Review Results
 
-**If PASS**: Proceed to Phase 5.
+After `roborev review --wait` returns, check the result with a separate command:
 
-**If FAIL**: Fix the findings:
+```bash
+roborev status
+```
+
+Use the job ID from the status output to view findings:
+
+```bash
+roborev show <job-id>
+```
+
+**If PASS (no actionable findings)**: Proceed to Phase 5.
+
+**If FAIL (actionable findings)**: Fix the findings:
 
 ```bash
 roborev fix

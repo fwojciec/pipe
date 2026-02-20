@@ -104,7 +104,10 @@ make validate
 
 ### 3.2 Run Roborev Branch Review
 
-Review all changes on the branch:
+Review all changes on the branch. Run this command exactly once. Do NOT re-run
+it, do NOT wrap it with `2>&1`, `echo $?`, or any other shell constructs. Each
+invocation submits a new paid review. If the output is confusing, proceed to 3.3
+to check results separately.
 
 ```bash
 git add .
@@ -116,9 +119,21 @@ roborev review --branch --wait
 
 ### 3.3 Handle Review Results
 
-**If PASS**: Proceed to Phase 4. Do not stop to ask.
+After `roborev review` returns, check the result with a separate command:
 
-**If FAIL**: Fix the findings:
+```bash
+roborev status
+```
+
+Use the job ID from the status output to view findings:
+
+```bash
+roborev show <job-id>
+```
+
+**If PASS (no actionable findings)**: Proceed to Phase 4. Do not stop to ask.
+
+**If FAIL (actionable findings)**: Fix the findings:
 
 ```bash
 roborev fix
