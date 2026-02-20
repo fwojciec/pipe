@@ -1,4 +1,4 @@
-package builtin_test
+package main
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/builtin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,14 +15,9 @@ import (
 func TestExecutor(t *testing.T) {
 	t.Parallel()
 
-	t.Run("implements ToolExecutor interface", func(t *testing.T) {
-		t.Parallel()
-		var _ pipe.ToolExecutor = (*builtin.Executor)(nil)
-	})
-
 	t.Run("dispatches bash tool", func(t *testing.T) {
 		t.Parallel()
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args := json.RawMessage(`{"command": "echo dispatched"}`)
 		result, err := exec.Execute(context.Background(), "bash", args)
 		require.NoError(t, err)
@@ -40,7 +34,7 @@ func TestExecutor(t *testing.T) {
 		path := filepath.Join(dir, "test.txt")
 		require.NoError(t, os.WriteFile(path, []byte("read me"), 0o644))
 
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args, _ := json.Marshal(map[string]any{"file_path": path})
 		result, err := exec.Execute(context.Background(), "read", args)
 		require.NoError(t, err)
@@ -56,7 +50,7 @@ func TestExecutor(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "out.txt")
 
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args, _ := json.Marshal(map[string]any{"file_path": path, "content": "written"})
 		result, err := exec.Execute(context.Background(), "write", args)
 		require.NoError(t, err)
@@ -73,7 +67,7 @@ func TestExecutor(t *testing.T) {
 		path := filepath.Join(dir, "edit.txt")
 		require.NoError(t, os.WriteFile(path, []byte("old value"), 0o644))
 
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args, _ := json.Marshal(map[string]any{
 			"file_path":  path,
 			"old_string": "old value",
@@ -88,25 +82,13 @@ func TestExecutor(t *testing.T) {
 		assert.Equal(t, "new value", string(data))
 	})
 
-	t.Run("returns tool error for unknown tool", func(t *testing.T) {
-		t.Parallel()
-		exec := builtin.NewExecutor()
-		result, err := exec.Execute(context.Background(), "nonexistent", json.RawMessage(`{}`))
-		require.NoError(t, err)
-		require.True(t, result.IsError)
-
-		text, ok := result.Content[0].(pipe.TextBlock)
-		require.True(t, ok)
-		assert.Contains(t, text.Text, "nonexistent")
-	})
-
 	t.Run("dispatches grep tool", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		path := filepath.Join(dir, "test.txt")
 		require.NoError(t, os.WriteFile(path, []byte("findme\n"), 0o644))
 
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args, _ := json.Marshal(map[string]any{"pattern": "findme", "path": dir})
 		result, err := exec.Execute(context.Background(), "grep", args)
 		require.NoError(t, err)
@@ -122,7 +104,7 @@ func TestExecutor(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.go"), []byte(""), 0o644))
 
-		exec := builtin.NewExecutor()
+		exec := &executor{}
 		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
 		result, err := exec.Execute(context.Background(), "glob", args)
 		require.NoError(t, err)
@@ -133,21 +115,35 @@ func TestExecutor(t *testing.T) {
 		assert.Contains(t, text.Text, "test.go")
 	})
 
-	t.Run("Tools returns all tool definitions", func(t *testing.T) {
+	t.Run("returns tool error for unknown tool", func(t *testing.T) {
 		t.Parallel()
-		exec := builtin.NewExecutor()
-		tools := exec.Tools()
-		assert.Len(t, tools, 6)
+		exec := &executor{}
+		result, err := exec.Execute(context.Background(), "nonexistent", json.RawMessage(`{}`))
+		require.NoError(t, err)
+		require.True(t, result.IsError)
 
-		names := make(map[string]bool)
-		for _, tool := range tools {
-			names[tool.Name] = true
+		text, ok := result.Content[0].(pipe.TextBlock)
+		require.True(t, ok)
+		assert.Contains(t, text.Text, "nonexistent")
+	})
+
+	t.Run("every tool in tools() is dispatchable", func(t *testing.T) {
+		t.Parallel()
+		exec := &executor{}
+		for _, tool := range tools() {
+			t.Run(tool.Name, func(t *testing.T) {
+				t.Parallel()
+				// Dispatch with empty args — we only need dispatch to reach the
+				// tool handler, not to succeed. An unknown-tool result would have
+				// IsError=true and contain "unknown tool".
+				result, err := exec.Execute(context.Background(), tool.Name, json.RawMessage(`{}`))
+				require.NoError(t, err)
+				if result.IsError {
+					text, ok := result.Content[0].(pipe.TextBlock)
+					require.True(t, ok)
+					assert.NotContains(t, text.Text, "unknown tool", "tool %q not dispatched", tool.Name)
+				}
+			})
 		}
-		assert.True(t, names["bash"])
-		assert.True(t, names["read"])
-		assert.True(t, names["write"])
-		assert.True(t, names["edit"])
-		assert.True(t, names["grep"])
-		assert.True(t, names["glob"])
 	})
 }

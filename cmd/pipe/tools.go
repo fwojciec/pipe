@@ -1,4 +1,4 @@
-package builtin
+package main
 
 import (
 	"context"
@@ -11,19 +11,14 @@ import (
 )
 
 // Compile-time interface check.
-var _ pipe.ToolExecutor = (*Executor)(nil)
+var _ pipe.ToolExecutor = (*executor)(nil)
 
-// Executor dispatches tool calls to the appropriate built-in tool implementation.
-type Executor struct{}
-
-// NewExecutor creates a new Executor.
-func NewExecutor() *Executor {
-	return &Executor{}
-}
+// executor dispatches tool calls to the appropriate built-in tool implementation.
+type executor struct{}
 
 // Execute dispatches a tool call by name. Unknown tool names return an IsError
 // result so the model can self-correct.
-func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
+func (e *executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
 	switch name {
 	case "bash":
 		return shell.ExecuteBash(ctx, args)
@@ -45,8 +40,8 @@ func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessag
 	}
 }
 
-// Tools returns the tool definitions for all built-in tools.
-func (e *Executor) Tools() []pipe.Tool {
+// tools returns the tool definitions for all built-in tools.
+func tools() []pipe.Tool {
 	return []pipe.Tool{
 		shell.BashTool(),
 		fs.ReadTool(),
