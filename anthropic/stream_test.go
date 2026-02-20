@@ -431,12 +431,14 @@ func TestStream_CacheUsage(t *testing.T) {
 
 func TestStream_CacheUsageCumulative(t *testing.T) {
 	t.Parallel()
+	// message_delta usage is cumulative (per Anthropic docs), so its values
+	// replace — not add to — the message_start values.
 	resp := sseResponse{events: []sseEvent{
 		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
 		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
 		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
-		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"cache_creation_input_tokens":10,"cache_read_input_tokens":30}}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}`},
 		{"message_stop", `{"type":"message_stop"}`},
 	}}
 
@@ -445,8 +447,32 @@ func TestStream_CacheUsageCumulative(t *testing.T) {
 
 	msg, err := s.Message()
 	require.NoError(t, err)
-	assert.Equal(t, 60, msg.Usage.CacheWriteTokens)
-	assert.Equal(t, 230, msg.Usage.CacheReadTokens)
+	assert.Equal(t, 50, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 200, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_CacheUsageMultipleDeltas(t *testing.T) {
+	t.Parallel()
+	// Multiple message_delta events with increasing cumulative cache totals.
+	// Last cumulative value wins — no addition across deltas.
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{},"usage":{"output_tokens":3,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"cache_creation_input_tokens":75,"cache_read_input_tokens":300}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	assert.Equal(t, 75, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 300, msg.Usage.CacheReadTokens)
+	assert.Equal(t, 5, msg.Usage.OutputTokens)
 }
 
 func TestStream_CacheUsageDeltaAbsent(t *testing.T) {

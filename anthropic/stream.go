@@ -313,10 +313,10 @@ func (s *stream) handleMessageDelta(data string) error {
 		s.msg.Usage.InputTokens = *evt.Usage.InputTokens
 	}
 	if evt.Usage.CacheCreationInputTokens != nil {
-		s.msg.Usage.CacheWriteTokens += *evt.Usage.CacheCreationInputTokens
+		s.msg.Usage.CacheWriteTokens = *evt.Usage.CacheCreationInputTokens
 	}
 	if evt.Usage.CacheReadInputTokens != nil {
-		s.msg.Usage.CacheReadTokens += *evt.Usage.CacheReadInputTokens
+		s.msg.Usage.CacheReadTokens = *evt.Usage.CacheReadInputTokens
 	}
 
 	if evt.Delta.StopReason != nil {
