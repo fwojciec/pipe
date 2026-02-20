@@ -99,9 +99,10 @@ make validate
 
 Fix issues before proceeding.
 
-### 3.3 Commit Progress
+### 3.3 Do NOT Commit During Implementation
 
-Commit at logical checkpoints during implementation. Don't wait until the end.
+Do not commit until Phase 5. A post-commit hook triggers a roborev review on
+every commit. All implementation work stays uncommitted until review passes.
 
 ---
 
@@ -115,35 +116,25 @@ make validate
 
 Must pass before review.
 
-### 4.2 Stage All Changes
+### 4.2 Review Staged Changes
+
+Stage all changes, then review them using `--dirty`. Run this command exactly
+once. Do NOT re-run it, do NOT wrap it with `2>&1`, `echo $?`, or any other
+shell constructs. Each invocation submits a new paid review.
 
 ```bash
 git add .
+roborev review --dirty --wait
 ```
 
-### 4.3 Run Roborev Review
-
-Run this command exactly once. Do NOT re-run it, do NOT wrap it with `2>&1`,
-`echo $?`, or any other shell constructs. Each invocation submits a new paid
-review. If the output is confusing, proceed to 4.4 to check results separately.
-
-```bash
-roborev review --wait
-```
-
-### 4.4 Handle Review Results
-
-After `roborev review --wait` returns, check the result with a separate command:
+If the output is confusing, check results separately:
 
 ```bash
 roborev status
-```
-
-Use the job ID from the status output to view findings:
-
-```bash
 roborev show <job-id>
 ```
+
+### 4.3 Handle Review Results
 
 **If PASS (no actionable findings)**: Proceed to Phase 5.
 
@@ -153,21 +144,17 @@ roborev show <job-id>
 roborev fix
 ```
 
-Then re-validate, commit, compact stale findings, and re-review:
+Then re-validate, re-stage, and re-review:
 
 ```bash
 make validate
 git add .
-git commit -m "Address review findings
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-roborev compact --wait
-roborev review --wait
+roborev review --dirty --wait
 ```
 
-If still failing after 2 fix cycles, yield (see 4.5).
+If still failing after 2 fix cycles, yield (see 4.4).
 
-### 4.5 Yield (On Persistent Review Failure)
+### 4.4 Yield (On Persistent Review Failure)
 
 If review cannot be resolved:
 

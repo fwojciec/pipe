@@ -88,9 +88,10 @@ Run frequently:
 make validate
 ```
 
-### 2.3 Commit Progress
+### 2.3 Do NOT Commit During Implementation
 
-Commit at logical checkpoints. Don't batch everything into one commit.
+Do not commit until Phase 4. A post-commit hook triggers a roborev review on
+every commit. All implementation work stays uncommitted until review passes.
 
 ---
 
@@ -102,34 +103,25 @@ Commit at logical checkpoints. Don't batch everything into one commit.
 make validate
 ```
 
-### 3.2 Run Roborev Branch Review
+### 3.2 Review Staged Changes
 
-Review all changes on the branch. Run this command exactly once. Do NOT re-run
-it, do NOT wrap it with `2>&1`, `echo $?`, or any other shell constructs. Each
-invocation submits a new paid review. If the output is confusing, proceed to 3.3
-to check results separately.
+Stage all changes, then review them using `--dirty`. Run this command exactly
+once. Do NOT re-run it, do NOT wrap it with `2>&1`, `echo $?`, or any other
+shell constructs. Each invocation submits a new paid review.
 
 ```bash
 git add .
-git commit -m "<descriptive message>
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-roborev review --branch --wait
+roborev review --dirty --wait
 ```
 
-### 3.3 Handle Review Results
-
-After `roborev review` returns, check the result with a separate command:
+If the output is confusing, check results separately:
 
 ```bash
 roborev status
-```
-
-Use the job ID from the status output to view findings:
-
-```bash
 roborev show <job-id>
 ```
+
+### 3.3 Handle Review Results
 
 **If PASS (no actionable findings)**: Proceed to Phase 4. Do not stop to ask.
 
@@ -139,11 +131,7 @@ roborev show <job-id>
 roborev fix
 make validate
 git add .
-git commit -m "Address review feedback
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-roborev compact --wait
-roborev review --branch --wait
+roborev review --dirty --wait
 ```
 
 If still failing after 2 fix cycles, stop and present blocking issues to the user.
@@ -152,9 +140,20 @@ If still failing after 2 fix cycles, stop and present blocking issues to the use
 
 ## Phase 4: Finish
 
-### 4.1 Final Validation
+### 4.1 Commit and Validate
 
 ```bash
+git add .
+git commit -m "$(cat <<'EOF'
+<issue-title>
+
+<brief description of changes>
+
+Closes #<issue-number>
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
 make validate
 ```
 
