@@ -91,13 +91,44 @@ func (c *Client) buildRequestBody(req pipe.Request) ([]byte, error) {
 		Model:       model,
 		MaxTokens:   maxTokens,
 		Stream:      true,
-		System:      req.SystemPrompt,
+		System:      convertSystem(req.SystemPrompt),
 		Messages:    convertMessages(req.Messages),
 		Tools:       convertTools(req.Tools),
 		Temperature: req.Temperature,
 	}
+	injectCacheMarkers(&apiReq)
 
 	return json.Marshal(apiReq)
+}
+
+// convertSystem converts a system prompt string to an array of content blocks
+// suitable for the Anthropic API. Returns nil when the prompt is empty.
+func convertSystem(prompt string) []apiContentBlock {
+	if prompt == "" {
+		return nil
+	}
+	return []apiContentBlock{{Type: "text", Text: prompt}}
+}
+
+// injectCacheMarkers sets cache_control breakpoints on the request:
+//  1. Top-level: automatic caching for the conversation message window.
+//  2. System prompt last block: stable content breakpoint.
+//  3. Last tool: stable tool definitions breakpoint.
+func injectCacheMarkers(req *apiRequest) {
+	cc := &apiCacheControl{Type: "ephemeral"}
+
+	// Top-level cache_control for automatic message-window caching.
+	req.CacheControl = cc
+
+	// System prompt last block.
+	if len(req.System) > 0 {
+		req.System[len(req.System)-1].CacheControl = cc
+	}
+
+	// Last tool.
+	if len(req.Tools) > 0 {
+		req.Tools[len(req.Tools)-1].CacheControl = cc
+	}
 }
 
 func convertMessages(msgs []pipe.Message) []apiMessage {

@@ -16,15 +16,22 @@ const (
 	messagesPath     = "/v1/messages"
 )
 
+// apiCacheControl specifies a cache breakpoint for prompt caching.
+type apiCacheControl struct {
+	Type string `json:"type"`          // always "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "" (default 5m) or "1h"
+}
+
 // apiRequest is the JSON body sent to the Anthropic Messages API.
 type apiRequest struct {
-	Model       string       `json:"model"`
-	MaxTokens   int          `json:"max_tokens"`
-	Stream      bool         `json:"stream"`
-	System      string       `json:"system,omitempty"`
-	Messages    []apiMessage `json:"messages"`
-	Tools       []apiTool    `json:"tools,omitempty"`
-	Temperature *float64     `json:"temperature,omitempty"`
+	Model        string            `json:"model"`
+	MaxTokens    int               `json:"max_tokens"`
+	Stream       bool              `json:"stream"`
+	System       []apiContentBlock `json:"system,omitempty"`
+	Messages     []apiMessage      `json:"messages"`
+	Tools        []apiTool         `json:"tools,omitempty"`
+	Temperature  *float64          `json:"temperature,omitempty"`
+	CacheControl *apiCacheControl  `json:"cache_control,omitempty"`
 }
 
 type apiMessage struct {
@@ -55,6 +62,9 @@ type apiContentBlock struct {
 
 	// image
 	Source *apiImageSource `json:"source,omitempty"`
+
+	// cache control
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
 type apiImageSource struct {
@@ -64,9 +74,10 @@ type apiImageSource struct {
 }
 
 type apiTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	InputSchema  json.RawMessage  `json:"input_schema"`
+	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
 }
 
 // SSE response types.

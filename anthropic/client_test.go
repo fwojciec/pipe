@@ -59,7 +59,14 @@ func TestClient_RequestFormat(t *testing.T) {
 	assert.Equal(t, "claude-opus-4-20250514", body["model"])
 	assert.Equal(t, float64(1024), body["max_tokens"])
 	assert.Equal(t, true, body["stream"])
-	assert.Equal(t, "You are helpful.", body["system"])
+	// System should be an array of content blocks with cache_control on the last block.
+	system := body["system"].([]interface{})
+	require.Len(t, system, 1)
+	sysBlock := system[0].(map[string]interface{})
+	assert.Equal(t, "text", sysBlock["type"])
+	assert.Equal(t, "You are helpful.", sysBlock["text"])
+	cc := sysBlock["cache_control"].(map[string]interface{})
+	assert.Equal(t, "ephemeral", cc["type"])
 	assert.Equal(t, 0.7, body["temperature"])
 
 	msgs := body["messages"].([]interface{})
@@ -78,6 +85,146 @@ func TestClient_RequestFormat(t *testing.T) {
 	tool0 := tools[0].(map[string]interface{})
 	assert.Equal(t, "read", tool0["name"])
 	assert.Equal(t, "Read a file", tool0["description"])
+}
+
+func TestClient_CacheMarkers(t *testing.T) {
+	t.Parallel()
+
+	minimalSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	t.Run("top-level, system, and last tool are marked", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			SystemPrompt: "You are helpful.",
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+			Tools: []pipe.Tool{
+				{Name: "read", Description: "Read", Parameters: json.RawMessage(`{"type":"object"}`)},
+				{Name: "write", Description: "Write", Parameters: json.RawMessage(`{"type":"object"}`)},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		// Top-level cache_control present.
+		topCC := body["cache_control"].(map[string]interface{})
+		assert.Equal(t, "ephemeral", topCC["type"])
+
+		// System last block has cache_control.
+		system := body["system"].([]interface{})
+		lastSysBlock := system[len(system)-1].(map[string]interface{})
+		sysCC := lastSysBlock["cache_control"].(map[string]interface{})
+		assert.Equal(t, "ephemeral", sysCC["type"])
+
+		// Last tool has cache_control, first does not.
+		tools := body["tools"].([]interface{})
+		require.Len(t, tools, 2)
+		tool0 := tools[0].(map[string]interface{})
+		assert.Nil(t, tool0["cache_control"])
+		tool1 := tools[1].(map[string]interface{})
+		toolCC := tool1["cache_control"].(map[string]interface{})
+		assert.Equal(t, "ephemeral", toolCC["type"])
+	})
+
+	t.Run("no system prompt - no system field", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		assert.Nil(t, body["system"])
+	})
+
+	t.Run("no tools - no tool cache_control", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			SystemPrompt: "Be helpful.",
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		assert.Nil(t, body["tools"])
+	})
+
+	t.Run("single tool is marked", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+			Tools: []pipe.Tool{
+				{Name: "read", Description: "Read", Parameters: json.RawMessage(`{"type":"object"}`)},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		tools := body["tools"].([]interface{})
+		require.Len(t, tools, 1)
+		tool0 := tools[0].(map[string]interface{})
+		toolCC := tool0["cache_control"].(map[string]interface{})
+		assert.Equal(t, "ephemeral", toolCC["type"])
+	})
 }
 
 func TestClient_DefaultModelAndMaxTokens(t *testing.T) {
