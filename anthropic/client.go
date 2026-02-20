@@ -115,6 +115,7 @@ func convertSystem(prompt string) []apiContentBlock {
 //  2. System prompt last block: stable content breakpoint.
 //  3. Last tool: stable tool definitions breakpoint.
 func injectCacheMarkers(req *apiRequest) {
+	// cc is shared across all breakpoints; safe because it is read-only after assignment.
 	cc := &apiCacheControl{Type: "ephemeral"}
 
 	// Top-level cache_control for automatic message-window caching.
