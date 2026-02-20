@@ -1,4 +1,4 @@
-package builtin_test
+package fs_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/builtin"
+	"github.com/fwojciec/pipe/fs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestGlobTool(t *testing.T) {
 
 	t.Run("returns tool definition with correct schema", func(t *testing.T) {
 		t.Parallel()
-		tool := builtin.GlobTool()
+		tool := fs.GlobTool()
 		assert.Equal(t, "glob", tool.Name)
 		assert.NotEmpty(t, tool.Description)
 
@@ -42,7 +42,7 @@ func TestGlobTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "c.txt"), []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -63,7 +63,7 @@ func TestGlobTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(sub, "nested.go"), []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "**/*.go", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -79,7 +79,7 @@ func TestGlobTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -93,7 +93,7 @@ func TestGlobTool(t *testing.T) {
 		dir := t.TempDir()
 
 		args, _ := json.Marshal(map[string]any{"pattern": "[invalid", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -101,7 +101,7 @@ func TestGlobTool(t *testing.T) {
 	t.Run("returns domain error for missing pattern", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"path": "/tmp"}`)
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -109,7 +109,7 @@ func TestGlobTool(t *testing.T) {
 	t.Run("returns domain error for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{invalid`)
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -117,7 +117,7 @@ func TestGlobTool(t *testing.T) {
 	t.Run("returns domain error for nonexistent path", func(t *testing.T) {
 		t.Parallel()
 		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": "/nonexistent/dir"})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -130,7 +130,7 @@ func TestGlobTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(sub, "file.go"), []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "**/*.go", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -148,7 +148,7 @@ func TestGlobTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(deep, "deep.go"), []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "**/*.go", "path": dir})
-		result, err := builtin.ExecuteGlob(context.Background(), args)
+		result, err := fs.ExecuteGlob(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 

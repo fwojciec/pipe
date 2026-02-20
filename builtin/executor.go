@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/fwojciec/pipe"
+	"github.com/fwojciec/pipe/fs"
+	"github.com/fwojciec/pipe/shell"
 )
 
 // Compile-time interface check.
@@ -24,17 +26,17 @@ func NewExecutor() *Executor {
 func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
 	switch name {
 	case "bash":
-		return ExecuteBash(ctx, args)
+		return shell.ExecuteBash(ctx, args)
 	case "read":
-		return ExecuteRead(ctx, args)
+		return fs.ExecuteRead(ctx, args)
 	case "write":
-		return ExecuteWrite(ctx, args)
+		return fs.ExecuteWrite(ctx, args)
 	case "edit":
-		return ExecuteEdit(ctx, args)
+		return fs.ExecuteEdit(ctx, args)
 	case "grep":
-		return ExecuteGrep(ctx, args)
+		return fs.ExecuteGrep(ctx, args)
 	case "glob":
-		return ExecuteGlob(ctx, args)
+		return fs.ExecuteGlob(ctx, args)
 	default:
 		return &pipe.ToolResult{
 			Content: []pipe.ContentBlock{pipe.TextBlock{Text: fmt.Sprintf("unknown tool: %s", name)}},
@@ -46,11 +48,11 @@ func (e *Executor) Execute(ctx context.Context, name string, args json.RawMessag
 // Tools returns the tool definitions for all built-in tools.
 func (e *Executor) Tools() []pipe.Tool {
 	return []pipe.Tool{
-		BashTool(),
-		ReadTool(),
-		WriteTool(),
-		EditTool(),
-		GrepTool(),
-		GlobTool(),
+		shell.BashTool(),
+		fs.ReadTool(),
+		fs.WriteTool(),
+		fs.EditTool(),
+		fs.GrepTool(),
+		fs.GlobTool(),
 	}
 }

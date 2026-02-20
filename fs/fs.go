@@ -1,5 +1,5 @@
-// Package builtin provides the built-in tools for the pipe agent.
-package builtin
+// Package fs provides filesystem tools: read, write, edit, grep, and glob.
+package fs
 
 import "github.com/fwojciec/pipe"
 

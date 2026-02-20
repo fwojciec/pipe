@@ -1,4 +1,4 @@
-package builtin
+package fs
 
 import (
 	"bufio"
@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,7 +74,7 @@ func ExecuteGrep(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 	if !info.IsDir() {
 		grepFile(&b, a.Path, filepath.Dir(a.Path), re)
 	} else {
-		err = filepath.WalkDir(a.Path, func(path string, d fs.DirEntry, err error) error {
+		err = filepath.WalkDir(a.Path, func(path string, d iofs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}

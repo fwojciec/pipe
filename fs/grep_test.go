@@ -1,4 +1,4 @@
-package builtin_test
+package fs_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/builtin"
+	"github.com/fwojciec/pipe/fs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestGrepTool(t *testing.T) {
 
 	t.Run("returns tool definition with correct schema", func(t *testing.T) {
 		t.Parallel()
-		tool := builtin.GrepTool()
+		tool := fs.GrepTool()
 		assert.Equal(t, "grep", tool.Name)
 		assert.NotEmpty(t, tool.Description)
 
@@ -43,7 +43,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("package main\n\nfunc hello() {}\nfunc world() {}\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "func", "path": path})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -63,7 +63,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(sub, "b.txt"), []byte("match there\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "match", "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -79,7 +79,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte("foo123bar\nbaz456qux\nhello\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": `\d+`, "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -97,7 +97,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("match\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "match", "path": dir, "glob": "*.go"})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -113,7 +113,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello world\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "zzzzz", "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -128,7 +128,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte("text\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "[invalid", "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -136,7 +136,7 @@ func TestGrepTool(t *testing.T) {
 	t.Run("returns domain error for missing pattern", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"path": "/tmp"}`)
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -144,7 +144,7 @@ func TestGrepTool(t *testing.T) {
 	t.Run("returns domain error for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{invalid`)
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -152,7 +152,7 @@ func TestGrepTool(t *testing.T) {
 	t.Run("returns domain error for nonexistent path", func(t *testing.T) {
 		t.Parallel()
 		args, _ := json.Marshal(map[string]any{"pattern": "test", "path": "/nonexistent/dir"})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -163,7 +163,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.txt"), []byte("alpha\nbeta\ngamma\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "beta", "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -179,7 +179,7 @@ func TestGrepTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "binary.bin"), []byte("match\x00\x01\x02"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"pattern": "match", "path": dir})
-		result, err := builtin.ExecuteGrep(context.Background(), args)
+		result, err := fs.ExecuteGrep(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 

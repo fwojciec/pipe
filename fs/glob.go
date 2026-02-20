@@ -1,10 +1,10 @@
-package builtin
+package fs
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +66,7 @@ func ExecuteGlob(_ context.Context, args json.RawMessage) (*pipe.ToolResult, err
 	fsys := os.DirFS(a.Path)
 	var matches []string
 
-	err = doublestar.GlobWalk(fsys, a.Pattern, func(path string, d fs.DirEntry) error {
+	err = doublestar.GlobWalk(fsys, a.Pattern, func(path string, d iofs.DirEntry) error {
 		if d.IsDir() {
 			return nil
 		}

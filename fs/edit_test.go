@@ -1,4 +1,4 @@
-package builtin_test
+package fs_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/builtin"
+	"github.com/fwojciec/pipe/fs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestEditTool(t *testing.T) {
 
 	t.Run("returns tool definition with correct schema", func(t *testing.T) {
 		t.Parallel()
-		tool := builtin.EditTool()
+		tool := fs.EditTool()
 		assert.Equal(t, "edit", tool.Name)
 		assert.NotEmpty(t, tool.Description)
 
@@ -47,7 +47,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "greet",
 			"new_string": "welcome",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -67,7 +67,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "foo",
 			"new_string": "qux",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -88,7 +88,7 @@ func TestEditTool(t *testing.T) {
 			"new_string":  "qux",
 			"replace_all": true,
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -108,7 +108,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "notfound",
 			"new_string": "replacement",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -124,7 +124,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "a",
 			"new_string": "b",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -132,7 +132,7 @@ func TestEditTool(t *testing.T) {
 	t.Run("errors on missing file_path", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"old_string": "a", "new_string": "b"}`)
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -140,7 +140,7 @@ func TestEditTool(t *testing.T) {
 	t.Run("errors on invalid JSON", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{invalid`)
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -156,7 +156,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "func old() {\n\treturn 1\n}",
 			"new_string": "func new() {\n\treturn 2\n}",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -176,7 +176,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "",
 			"new_string": "replacement",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -197,7 +197,7 @@ func TestEditTool(t *testing.T) {
 			"new_string":  "X",
 			"replace_all": true,
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -218,7 +218,7 @@ func TestEditTool(t *testing.T) {
 			"old_string": "echo old",
 			"new_string": "echo new",
 		})
-		result, err := builtin.ExecuteEdit(context.Background(), args)
+		result, err := fs.ExecuteEdit(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 

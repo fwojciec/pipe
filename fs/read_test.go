@@ -1,4 +1,4 @@
-package builtin_test
+package fs_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/builtin"
+	"github.com/fwojciec/pipe/fs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestReadTool(t *testing.T) {
 
 	t.Run("returns tool definition with correct schema", func(t *testing.T) {
 		t.Parallel()
-		tool := builtin.ReadTool()
+		tool := fs.ReadTool()
 		assert.Equal(t, "read", tool.Name)
 		assert.NotEmpty(t, tool.Description)
 
@@ -43,7 +43,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 		require.Len(t, result.Content, 1)
@@ -62,7 +62,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\nline4\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path, "offset": 2})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -79,7 +79,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\nline4\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path, "limit": 2})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -97,7 +97,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\nline4\nline5\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path, "offset": 2, "limit": 2})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -112,7 +112,7 @@ func TestReadTool(t *testing.T) {
 	t.Run("returns domain error for missing file", func(t *testing.T) {
 		t.Parallel()
 		args, _ := json.Marshal(map[string]any{"file_path": "/nonexistent/file.txt"})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -120,7 +120,7 @@ func TestReadTool(t *testing.T) {
 	t.Run("returns domain error for missing file_path", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{}`)
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -132,7 +132,7 @@ func TestReadTool(t *testing.T) {
 	t.Run("returns domain error for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{invalid`)
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -144,7 +144,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -160,7 +160,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("line1\nline2\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path, "offset": 100})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
@@ -176,7 +176,7 @@ func TestReadTool(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644))
 
 		args, _ := json.Marshal(map[string]any{"file_path": path})
-		result, err := builtin.ExecuteRead(context.Background(), args)
+		result, err := fs.ExecuteRead(context.Background(), args)
 		require.NoError(t, err)
 
 		text, ok := result.Content[0].(pipe.TextBlock)
