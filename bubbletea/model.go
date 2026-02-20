@@ -14,6 +14,8 @@ import (
 	"github.com/fwojciec/pipe"
 )
 
+var _ tea.Model = Model{}
+
 // Model is the Bubble Tea model for the pipe TUI.
 type Model struct {
 	// Input is the text input component. Exported for test access.
