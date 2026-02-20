@@ -382,6 +382,116 @@ func TestClient_ToolResultIsError(t *testing.T) {
 	assert.Equal(t, true, block["is_error"])
 }
 
+func TestClient_CacheTTL(t *testing.T) {
+	t.Parallel()
+
+	minimalSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	t.Run("1h TTL propagates to all cache_control markers", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithCacheTTL("1h"))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			SystemPrompt: "Be helpful.",
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+			Tools: []pipe.Tool{
+				{Name: "read", Description: "Read", Parameters: json.RawMessage(`{"type":"object"}`)},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		// Top-level cache_control has TTL.
+		topCC := body["cache_control"].(map[string]interface{})
+		assert.Equal(t, "1h", topCC["ttl"])
+
+		// System last block cache_control has TTL.
+		system := body["system"].([]interface{})
+		lastSysBlock := system[len(system)-1].(map[string]interface{})
+		sysCC := lastSysBlock["cache_control"].(map[string]interface{})
+		assert.Equal(t, "1h", sysCC["ttl"])
+
+		// Last tool cache_control has TTL.
+		tools := body["tools"].([]interface{})
+		lastTool := tools[len(tools)-1].(map[string]interface{})
+		toolCC := lastTool["cache_control"].(map[string]interface{})
+		assert.Equal(t, "1h", toolCC["ttl"])
+	})
+
+	t.Run("default empty TTL omits ttl field", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			SystemPrompt: "Be helpful.",
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		topCC := body["cache_control"].(map[string]interface{})
+		assert.Nil(t, topCC["ttl"])
+
+		system := body["system"].([]interface{})
+		lastSysBlock := system[len(system)-1].(map[string]interface{})
+		sysCC := lastSysBlock["cache_control"].(map[string]interface{})
+		assert.Nil(t, sysCC["ttl"])
+	})
+
+	t.Run("invalid TTL returns error without invoking HTTP handler", func(t *testing.T) {
+		t.Parallel()
+		handlerInvoked := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handlerInvoked = true
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL), anthropic.WithCacheTTL("5m"))
+		_, err := client.Stream(context.Background(), pipe.Request{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+			},
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "anthropic:")
+		assert.False(t, handlerInvoked, "HTTP handler must not be invoked for invalid TTL")
+	})
+}
+
+func TestClient_CacheFallbackResilience(t *testing.T) {
+	t.Parallel()
+	t.Skip("cache fallback not yet needed: Anthropic API currently ignores cache_control on unsupported models")
+}
+
 func TestClient_HTTPError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

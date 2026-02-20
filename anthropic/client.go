@@ -20,6 +20,7 @@ type Client struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	cacheTTL   string
 }
 
 // Option configures a [Client].
@@ -33,6 +34,12 @@ func WithBaseURL(url string) Option {
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
+}
+
+// WithCacheTTL sets the cache TTL for prompt caching breakpoints.
+// Valid values are "" (default, 5 minutes) and "1h" (1 hour, 2x base input cost).
+func WithCacheTTL(ttl string) Option {
+	return func(c *Client) { c.cacheTTL = ttl }
 }
 
 // New creates a new Anthropic [Client] with the given API key and options.
@@ -78,6 +85,10 @@ func (c *Client) Stream(ctx context.Context, req pipe.Request) (pipe.Stream, err
 }
 
 func (c *Client) buildRequestBody(req pipe.Request) ([]byte, error) {
+	if c.cacheTTL != "" && c.cacheTTL != "1h" {
+		return nil, fmt.Errorf("invalid cache TTL %q: must be \"\" or \"1h\"", c.cacheTTL)
+	}
+
 	model := req.Model
 	if model == "" {
 		model = defaultModel
@@ -96,7 +107,7 @@ func (c *Client) buildRequestBody(req pipe.Request) ([]byte, error) {
 		Tools:       convertTools(req.Tools),
 		Temperature: req.Temperature,
 	}
-	injectCacheMarkers(&apiReq)
+	injectCacheMarkers(&apiReq, c.cacheTTL)
 
 	return json.Marshal(apiReq)
 }
@@ -114,9 +125,9 @@ func convertSystem(prompt string) []apiContentBlock {
 //  1. Top-level: automatic caching for the conversation message window.
 //  2. System prompt last block: stable content breakpoint.
 //  3. Last tool: stable tool definitions breakpoint.
-func injectCacheMarkers(req *apiRequest) {
+func injectCacheMarkers(req *apiRequest, ttl string) {
 	// cc is shared across all breakpoints; safe because it is read-only after assignment.
-	cc := &apiCacheControl{Type: "ephemeral"}
+	cc := &apiCacheControl{Type: "ephemeral", TTL: ttl}
 
 	// Top-level cache_control for automatic message-window caching.
 	req.CacheControl = cc
