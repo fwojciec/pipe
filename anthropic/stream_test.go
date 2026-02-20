@@ -407,6 +407,173 @@ func TestStream_MaxTokensStopReason(t *testing.T) {
 	assert.Equal(t, "max_tokens", msg.RawStopReason)
 }
 
+func TestStream_CacheUsage(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	assert.Equal(t, 10, msg.Usage.InputTokens)
+	assert.Equal(t, 5, msg.Usage.OutputTokens)
+	assert.Equal(t, 50, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 200, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_CacheUsageCumulative(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"cache_creation_input_tokens":10,"cache_read_input_tokens":30}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	assert.Equal(t, 60, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 230, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_CacheUsageDeltaAbsent(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	// Cache values from message_start should NOT be overwritten by message_delta absence.
+	assert.Equal(t, 50, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 200, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_CacheUsageDeltaNull(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"cache_creation_input_tokens":null,"cache_read_input_tokens":null}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	// Explicit JSON null must NOT overwrite message_start values.
+	assert.Equal(t, 50, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 200, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_CacheUsageNull(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":null,"cache_read_input_tokens":null}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	events := collectEvents(t, s)
+
+	// No unmarshal error — stream should complete normally.
+	require.Len(t, events, 1)
+	msg, err := s.Message()
+	require.NoError(t, err)
+	assert.Equal(t, 0, msg.Usage.CacheWriteTokens)
+	assert.Equal(t, 0, msg.Usage.CacheReadTokens)
+}
+
+func TestStream_DeltaInputTokens(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delta present updates InputTokens", func(t *testing.T) {
+		t.Parallel()
+		resp := sseResponse{events: []sseEvent{
+			{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":1}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"input_tokens":100}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		}}
+
+		s := streamFromSSE(t, resp)
+		collectEvents(t, s)
+
+		msg, err := s.Message()
+		require.NoError(t, err)
+		assert.Equal(t, 100, msg.Usage.InputTokens)
+	})
+
+	t.Run("delta absent preserves message_start InputTokens", func(t *testing.T) {
+		t.Parallel()
+		resp := sseResponse{events: []sseEvent{
+			{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":1}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		}}
+
+		s := streamFromSSE(t, resp)
+		collectEvents(t, s)
+
+		msg, err := s.Message()
+		require.NoError(t, err)
+		assert.Equal(t, 100, msg.Usage.InputTokens)
+	})
+
+	t.Run("delta null preserves message_start InputTokens", func(t *testing.T) {
+		t.Parallel()
+		resp := sseResponse{events: []sseEvent{
+			{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":100,"output_tokens":1}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5,"input_tokens":null}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		}}
+
+		s := streamFromSSE(t, resp)
+		collectEvents(t, s)
+
+		msg, err := s.Message()
+		require.NoError(t, err)
+		assert.Equal(t, 100, msg.Usage.InputTokens)
+	})
+}
+
 func TestStream_ReadErrorMidStream(t *testing.T) {
 	t.Parallel()
 

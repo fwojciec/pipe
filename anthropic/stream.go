@@ -202,6 +202,12 @@ func (s *stream) handleMessageStart(data string) error {
 		return fmt.Errorf("anthropic: failed to parse message_start: %w", err)
 	}
 	s.msg.Usage.InputTokens = evt.Message.Usage.InputTokens
+	if evt.Message.Usage.CacheCreationInputTokens != nil {
+		s.msg.Usage.CacheWriteTokens += *evt.Message.Usage.CacheCreationInputTokens
+	}
+	if evt.Message.Usage.CacheReadInputTokens != nil {
+		s.msg.Usage.CacheReadTokens += *evt.Message.Usage.CacheReadInputTokens
+	}
 	return nil
 }
 
@@ -303,6 +309,15 @@ func (s *stream) handleMessageDelta(data string) error {
 	}
 
 	s.msg.Usage.OutputTokens = evt.Usage.OutputTokens
+	if evt.Usage.InputTokens != nil {
+		s.msg.Usage.InputTokens = *evt.Usage.InputTokens
+	}
+	if evt.Usage.CacheCreationInputTokens != nil {
+		s.msg.Usage.CacheWriteTokens += *evt.Usage.CacheCreationInputTokens
+	}
+	if evt.Usage.CacheReadInputTokens != nil {
+		s.msg.Usage.CacheReadTokens += *evt.Usage.CacheReadInputTokens
+	}
 
 	if evt.Delta.StopReason != nil {
 		s.msg.RawStopReason = *evt.Delta.StopReason

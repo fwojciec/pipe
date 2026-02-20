@@ -84,9 +84,22 @@ type sseMessagePayload struct {
 	Usage        sseUsage `json:"usage"`
 }
 
+// sseUsage is used in message_start events.
+// Cache fields are nullable per the Anthropic API schema.
 type sseUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int  `json:"input_tokens"`
+	OutputTokens             int  `json:"output_tokens"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens"`
+}
+
+// sseDeltaUsage is used in message_delta events.
+// All fields except OutputTokens may be absent or null.
+type sseDeltaUsage struct {
+	OutputTokens             int  `json:"output_tokens"`
+	InputTokens              *int `json:"input_tokens,omitempty"`
+	CacheCreationInputTokens *int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     *int `json:"cache_read_input_tokens,omitempty"`
 }
 
 type sseContentBlockStart struct {
@@ -125,7 +138,7 @@ type sseContentBlockStop struct {
 type sseMessageDelta struct {
 	Type  string             `json:"type"`
 	Delta sseMessageDeltaVal `json:"delta"`
-	Usage sseUsage           `json:"usage"`
+	Usage sseDeltaUsage      `json:"usage"`
 }
 
 type sseMessageDeltaVal struct {
