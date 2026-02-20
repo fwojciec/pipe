@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/fwojciec/pipe"
+	pipeexec "github.com/fwojciec/pipe/exec"
 	"github.com/fwojciec/pipe/fs"
-	"github.com/fwojciec/pipe/shell"
 )
 
 // Compile-time interface check.
@@ -21,7 +21,7 @@ type executor struct{}
 func (e *executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
 	switch name {
 	case "bash":
-		return shell.ExecuteBash(ctx, args)
+		return pipeexec.ExecuteBash(ctx, args)
 	case "read":
 		return fs.ExecuteRead(ctx, args)
 	case "write":
@@ -43,7 +43,7 @@ func (e *executor) Execute(ctx context.Context, name string, args json.RawMessag
 // tools returns the tool definitions for all built-in tools.
 func tools() []pipe.Tool {
 	return []pipe.Tool{
-		shell.BashTool(),
+		pipeexec.BashTool(),
 		fs.ReadTool(),
 		fs.WriteTool(),
 		fs.EditTool(),

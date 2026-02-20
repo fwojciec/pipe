@@ -1,4 +1,4 @@
-package shell_test
+package exec_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/shell"
+	pipeexec "github.com/fwojciec/pipe/exec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestBashTool(t *testing.T) {
 
 	t.Run("returns tool definition with correct schema", func(t *testing.T) {
 		t.Parallel()
-		tool := shell.BashTool()
+		tool := pipeexec.BashTool()
 		assert.Equal(t, "bash", tool.Name)
 		assert.NotEmpty(t, tool.Description)
 
@@ -40,7 +40,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("executes simple command and returns output", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"command": "echo hello"}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 		require.Len(t, result.Content, 1)
@@ -53,7 +53,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("captures stderr in output", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"command": "echo error >&2"}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 		require.Len(t, result.Content, 1)
@@ -66,7 +66,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("returns domain error for non-zero exit code", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"command": "exit 1"}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -77,7 +77,7 @@ func TestBashTool(t *testing.T) {
 		cancel() // cancel immediately
 
 		args := json.RawMessage(`{"command": "sleep 10"}`)
-		result, err := shell.ExecuteBash(ctx, args)
+		result, err := pipeexec.ExecuteBash(ctx, args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -89,7 +89,7 @@ func TestBashTool(t *testing.T) {
 		}
 		args := json.RawMessage(`{"command": "sleep 10", "timeout": 100}`)
 		start := time.Now()
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		elapsed := time.Since(start)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
@@ -99,7 +99,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("returns error for missing command", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 
@@ -111,7 +111,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("returns error for invalid JSON args", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{invalid`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
@@ -119,7 +119,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("captures combined stdout and stderr", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"command": "echo out && echo err >&2"}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		require.Len(t, result.Content, 1)
 
@@ -132,7 +132,7 @@ func TestBashTool(t *testing.T) {
 	t.Run("handles multi-line output", func(t *testing.T) {
 		t.Parallel()
 		args := json.RawMessage(`{"command": "echo line1 && echo line2 && echo line3"}`)
-		result, err := shell.ExecuteBash(context.Background(), args)
+		result, err := pipeexec.ExecuteBash(context.Background(), args)
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 
