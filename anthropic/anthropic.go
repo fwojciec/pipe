@@ -48,7 +48,8 @@ type apiContentBlock struct {
 	Text string `json:"text,omitempty"`
 
 	// thinking
-	Thinking string `json:"thinking,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
 
 	// tool_use
 	ID    string          `json:"id,omitempty"`

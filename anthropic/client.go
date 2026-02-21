@@ -189,7 +189,7 @@ func convertContentBlocks(blocks []pipe.ContentBlock) []apiContentBlock {
 		case pipe.TextBlock:
 			result = append(result, apiContentBlock{Type: "text", Text: bl.Text})
 		case pipe.ThinkingBlock:
-			result = append(result, apiContentBlock{Type: "thinking", Thinking: bl.Thinking})
+			result = append(result, apiContentBlock{Type: "thinking", Thinking: bl.Thinking, Signature: string(bl.Signature)})
 		case pipe.ToolCallBlock:
 			result = append(result, apiContentBlock{Type: "tool_use", ID: bl.ID, Name: bl.Name, Input: bl.Arguments})
 		case pipe.ImageBlock:

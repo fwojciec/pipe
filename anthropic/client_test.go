@@ -382,6 +382,87 @@ func TestClient_ToolResultIsError(t *testing.T) {
 	assert.Equal(t, true, block["is_error"])
 }
 
+func TestClient_ThinkingBlockSignature(t *testing.T) {
+	t.Parallel()
+
+	minimalSSE := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"m\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	t.Run("signature included when present", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+				pipe.AssistantMessage{Content: []pipe.ContentBlock{
+					pipe.ThinkingBlock{Thinking: "reasoning here", Signature: []byte("sig-abc")},
+					pipe.TextBlock{Text: "answer"},
+				}},
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Thanks"}}},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		msgs := body["messages"].([]interface{})
+		assistantMsg := msgs[1].(map[string]interface{})
+		content := assistantMsg["content"].([]interface{})
+		require.Len(t, content, 2)
+		thinkingBlock := content[0].(map[string]interface{})
+		assert.Equal(t, "thinking", thinkingBlock["type"])
+		assert.Equal(t, "reasoning here", thinkingBlock["thinking"])
+		assert.Equal(t, "sig-abc", thinkingBlock["signature"])
+	})
+
+	t.Run("signature omitted when absent", func(t *testing.T) {
+		t.Parallel()
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(minimalSSE))
+		}))
+		defer srv.Close()
+
+		client := anthropic.New("key", anthropic.WithBaseURL(srv.URL))
+		s, err := client.Stream(context.Background(), pipe.Request{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hi"}}},
+				pipe.AssistantMessage{Content: []pipe.ContentBlock{
+					pipe.ThinkingBlock{Thinking: "old reasoning"},
+					pipe.TextBlock{Text: "answer"},
+				}},
+				pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Thanks"}}},
+			},
+		})
+		require.NoError(t, err)
+		defer s.Close()
+
+		var body map[string]interface{}
+		require.NoError(t, json.Unmarshal(captured, &body))
+
+		msgs := body["messages"].([]interface{})
+		assistantMsg := msgs[1].(map[string]interface{})
+		content := assistantMsg["content"].([]interface{})
+		thinkingBlock := content[0].(map[string]interface{})
+		assert.Equal(t, "thinking", thinkingBlock["type"])
+		_, exists := thinkingBlock["signature"]
+		assert.False(t, exists, "signature key should not be present when empty")
+	})
+}
+
 func TestClient_CacheTTL(t *testing.T) {
 	t.Parallel()
 

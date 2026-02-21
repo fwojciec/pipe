@@ -105,8 +105,33 @@ func TestStream_Thinking(t *testing.T) {
 	msg, err := s.Message()
 	require.NoError(t, err)
 	require.Len(t, msg.Content, 2)
-	assert.Equal(t, pipe.ThinkingBlock{Thinking: "Let me think... step 2"}, msg.Content[0])
+	assert.Equal(t, pipe.ThinkingBlock{Thinking: "Let me think... step 2", Signature: []byte("sig123")}, msg.Content[0])
 	assert.Equal(t, pipe.TextBlock{Text: "The answer is 42."}, msg.Content[1])
+}
+
+func TestStream_ThinkingMultiChunkSignature(t *testing.T) {
+	t.Parallel()
+	resp := sseResponse{events: []sseEvent{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-20250514","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":50,"output_tokens":1}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reasoning"}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"chunk1"}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"chunk2"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":10}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	}}
+
+	s := streamFromSSE(t, resp)
+	collectEvents(t, s)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 2)
+	assert.Equal(t, pipe.ThinkingBlock{Thinking: "reasoning", Signature: []byte("chunk1chunk2")}, msg.Content[0])
 }
 
 func TestStream_MultipleToolCalls(t *testing.T) {

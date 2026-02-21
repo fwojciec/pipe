@@ -24,12 +24,21 @@ type stream struct {
 
 // blockState tracks the state of a content block being assembled.
 type blockState struct {
-	blockType   string
-	toolID      string
-	toolName    string
-	inputBuf    strings.Builder
-	textBuf     strings.Builder
-	thinkingBuf strings.Builder
+	blockType    string
+	toolID       string
+	toolName     string
+	inputBuf     strings.Builder
+	textBuf      strings.Builder
+	thinkingBuf  strings.Builder
+	signatureBuf strings.Builder
+}
+
+// signature returns the accumulated signature as a byte slice, or nil if empty.
+func (bs *blockState) signature() []byte {
+	if bs.signatureBuf.Len() == 0 {
+		return nil
+	}
+	return []byte(bs.signatureBuf.String())
 }
 
 // Interface compliance check.
@@ -263,9 +272,17 @@ func (s *stream) handleContentBlockDelta(data string) (pipe.Event, error) {
 		return pipe.EventToolCallDelta{ID: bs.toolID, Delta: evt.Delta.PartialJSON}, nil
 	case "thinking_delta":
 		bs.thinkingBuf.WriteString(evt.Delta.Thinking)
-		s.msg.Content[evt.Index] = pipe.ThinkingBlock{Thinking: bs.thinkingBuf.String()}
+		s.msg.Content[evt.Index] = pipe.ThinkingBlock{
+			Thinking:  bs.thinkingBuf.String(),
+			Signature: bs.signature(),
+		}
 		return pipe.EventThinkingDelta{Index: evt.Index, Delta: evt.Delta.Thinking}, nil
 	case "signature_delta":
+		bs.signatureBuf.WriteString(evt.Delta.Signature)
+		s.msg.Content[evt.Index] = pipe.ThinkingBlock{
+			Thinking:  bs.thinkingBuf.String(),
+			Signature: bs.signature(),
+		}
 		// Internal use only; not exposed as a semantic event.
 		return nil, nil
 	default:
