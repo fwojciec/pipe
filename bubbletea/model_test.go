@@ -393,6 +393,65 @@ func TestModel_MultiTurnReset(t *testing.T) {
 	})
 }
 
+func TestModel_SessionReloadBlockFocus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tab toggles collapsible block from session reload", func(t *testing.T) {
+		t.Parallel()
+
+		session := &pipe.Session{
+			Messages: []pipe.Message{
+				pipe.AssistantMessage{Content: []pipe.ContentBlock{
+					pipe.ThinkingBlock{Thinking: "deep thoughts"},
+					pipe.TextBlock{Text: "answer"},
+				}},
+			},
+		}
+		theme := pipe.DefaultTheme()
+		m := bt.New(nopAgent, session, theme)
+		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Thinking block should start collapsed — content not visible.
+		assert.NotContains(t, m.View(), "deep thoughts")
+
+		// Tab should toggle the thinking block (focus was set by renderSession).
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.Contains(t, m.View(), "deep thoughts")
+	})
+}
+
+func TestModel_InputHeightResetOnSubmit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("input height resets to 1 after submit", func(t *testing.T) {
+		t.Parallel()
+
+		session := &pipe.Session{}
+		theme := pipe.DefaultTheme()
+		m := bt.New(nopAgent, session, theme)
+		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Type multi-line input.
+		m.Input.SetValue("line1")
+		m.Input, _ = m.Input.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+		m.Input = typeInputString(t, m.Input, "line2")
+
+		// Submit.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+		// Input should be back to height 1.
+		assert.Equal(t, 1, m.Input.Height())
+	})
+}
+
+func typeInputString(t *testing.T, ta textarea.Model, s string) textarea.Model {
+	t.Helper()
+	for _, r := range s {
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	return ta
+}
+
 func TestModel_Integration(t *testing.T) {
 	t.Parallel()
 

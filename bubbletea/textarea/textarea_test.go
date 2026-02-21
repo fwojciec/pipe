@@ -185,6 +185,19 @@ func TestAutoGrow(t *testing.T) {
 	})
 }
 
+func TestExactWidthDoesNotWrapToBlankLine(t *testing.T) {
+	t.Parallel()
+	ta := textarea.New()
+	ta.SetWidth(4)
+	ta.Focus()
+	ta.SetValue("abcd")
+	view := ta.View()
+	// "abcd" fits exactly in width 4 — should NOT produce a leading blank line.
+	lines := strings.Split(view, "\n")
+	assert.NotEmpty(t, lines)
+	assert.Contains(t, lines[0], "abcd")
+}
+
 func TestSetWidthInvalidatesCache(t *testing.T) {
 	t.Parallel()
 	ta := textarea.New()

@@ -188,6 +188,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 	if !m.ready {
 		m.Viewport = viewport.New(msg.Width, vpHeight)
 		m = m.renderSession()
+		m = m.updateBlockFocus()
 		m.Viewport.SetContent(m.renderContent())
 		m.Viewport.GotoBottom()
 		m.ready = true
@@ -273,6 +274,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	m.Input.SetValue("")
+	m.Input.SetHeight(1)
+	m.Viewport.Height = m.viewportHeight(1)
 	m.err = nil
 
 	// Append user message to session.
