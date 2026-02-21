@@ -596,7 +596,6 @@ import (
 	"github.com/fwojciec/pipe/gemini"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genai"
 )
 
 func TestConvertMessages_UserMessage(t *testing.T) {
@@ -918,7 +917,7 @@ func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
 	return parts
 }
 
-// extractText concatenates all TextBlocks in a slice of ContentBlocks.
+// extractText returns the text of the first TextBlock, or empty string if none.
 func extractText(blocks []pipe.ContentBlock) string {
 	for _, b := range blocks {
 		if tb, ok := b.(pipe.TextBlock); ok {
@@ -1580,20 +1579,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/fwojciec/pipe"
 	"github.com/fwojciec/pipe/anthropic"
 	"github.com/fwojciec/pipe/gemini"
 )
 
-func resolveProvider(ctx context.Context, providerFlag, apiKeyFlag string) (pipe.Provider, error) {
+// resolveProvider selects and constructs the provider. All env var values are
+// passed in as parameters — env is only read in main().
+func resolveProvider(ctx context.Context, providerFlag, apiKeyFlag, anthropicEnvKey, geminiEnvKey string) (pipe.Provider, error) {
 	provider := providerFlag
 
 	// Auto-detect from env vars if no flag.
 	if provider == "" {
-		hasAnthropic := os.Getenv("ANTHROPIC_API_KEY") != ""
-		hasGemini := os.Getenv("GEMINI_API_KEY") != ""
+		hasAnthropic := anthropicEnvKey != ""
+		hasGemini := geminiEnvKey != ""
 		switch {
 		case hasAnthropic && hasGemini:
 			return nil, fmt.Errorf("multiple API keys found (ANTHROPIC_API_KEY, GEMINI_API_KEY): use -provider flag to select")
@@ -1606,12 +1606,12 @@ func resolveProvider(ctx context.Context, providerFlag, apiKeyFlag string) (pipe
 		}
 	}
 
-	// Resolve API key.
+	// Resolve API key: explicit flag overrides env var.
 	key := apiKeyFlag
 	switch provider {
 	case "anthropic":
 		if key == "" {
-			key = os.Getenv("ANTHROPIC_API_KEY")
+			key = anthropicEnvKey
 		}
 		if key == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set (use -api-key flag or environment variable)")
@@ -1619,7 +1619,7 @@ func resolveProvider(ctx context.Context, providerFlag, apiKeyFlag string) (pipe
 		return anthropic.New(key), nil
 	case "gemini":
 		if key == "" {
-			key = os.Getenv("GEMINI_API_KEY")
+			key = geminiEnvKey
 		}
 		if key == "" {
 			return nil, fmt.Errorf("GEMINI_API_KEY not set (use -api-key flag or environment variable)")
@@ -1652,48 +1652,42 @@ import (
 
 func TestResolveProvider_ExplicitAnthropic(t *testing.T) {
 	t.Parallel()
-	p, err := resolveProvider(context.Background(), "anthropic", "sk-test")
+	p, err := resolveProvider(context.Background(), "anthropic", "sk-test", "", "")
 	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 
 func TestResolveProvider_UnknownProvider(t *testing.T) {
 	t.Parallel()
-	_, err := resolveProvider(context.Background(), "openai", "key")
+	_, err := resolveProvider(context.Background(), "openai", "key", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown provider")
 }
 
 func TestResolveProvider_NoKeysNoFlag(t *testing.T) {
 	t.Parallel()
-	// Unset env vars for this test.
-	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("GEMINI_API_KEY", "")
-	_, err := resolveProvider(context.Background(), "", "")
+	_, err := resolveProvider(context.Background(), "", "", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no API key found")
 }
 
 func TestResolveProvider_BothKeysNoFlag(t *testing.T) {
 	t.Parallel()
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
-	t.Setenv("GEMINI_API_KEY", "gk-gem")
-	_, err := resolveProvider(context.Background(), "", "")
+	_, err := resolveProvider(context.Background(), "", "", "sk-ant", "gk-gem")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple API keys")
 }
 
 func TestResolveProvider_AutoDetectAnthropic(t *testing.T) {
 	t.Parallel()
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
-	t.Setenv("GEMINI_API_KEY", "")
-	p, err := resolveProvider(context.Background(), "", "")
+	p, err := resolveProvider(context.Background(), "", "", "sk-ant", "")
 	require.NoError(t, err)
 	assert.NotNil(t, p)
 }
 ```
 
 Note: these tests use internal package access (`package main`) which is allowed for `cmd/` wiring tests.
+Env values are passed as parameters — no `t.Setenv`, safe with `t.Parallel()`.
 
 **Step 3: Update main.go**
 
@@ -1714,8 +1708,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Resolve provider.
-	provider, err := resolveProvider(ctx, *providerFlag, *apiKey)
+	// Resolve provider. Env vars are read here and passed as values.
+	provider, err := resolveProvider(ctx, *providerFlag, *apiKey,
+		os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("GEMINI_API_KEY"))
 	if err != nil {
 		return err
 	}
