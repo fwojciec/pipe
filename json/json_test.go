@@ -511,6 +511,104 @@ func TestMarshalSession_CacheUsageOmitsZeroFields(t *testing.T) {
 	assert.NotContains(t, usage, "cache_write_tokens")
 }
 
+func TestMarshalSession_ThinkingBlockSignatureRoundTrip(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "thinking-sig",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content: []pipe.ContentBlock{
+					pipe.ThinkingBlock{Thinking: "let me reason", Signature: []byte("opaque-sig-data")},
+				},
+				StopReason: pipe.StopEndTurn,
+				Timestamp:  time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	require.Len(t, am.Content, 1)
+	tb, ok := am.Content[0].(pipe.ThinkingBlock)
+	require.True(t, ok)
+	assert.Equal(t, "let me reason", tb.Thinking)
+	assert.Equal(t, []byte("opaque-sig-data"), tb.Signature)
+}
+
+func TestUnmarshalSession_BackwardCompatNoSignature(t *testing.T) {
+	t.Parallel()
+	// Old JSON without signature field in thinking block
+	data := []byte(`{
+		"version": 1,
+		"id": "old-thinking",
+		"created_at": "2026-02-18T12:00:00Z",
+		"updated_at": "2026-02-18T12:00:00Z",
+		"messages": [
+			{
+				"type": "assistant",
+				"content": [{"type": "thinking", "thinking": "some thoughts"}],
+				"stop_reason": "end_turn",
+				"raw_stop_reason": "end_turn",
+				"usage": {"input_tokens": 10, "output_tokens": 5},
+				"timestamp": "2026-02-18T12:00:00Z"
+			}
+		]
+	}`)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	require.Len(t, am.Content, 1)
+	tb, ok := am.Content[0].(pipe.ThinkingBlock)
+	require.True(t, ok)
+	assert.Equal(t, "some thoughts", tb.Thinking)
+	assert.Nil(t, tb.Signature)
+}
+
+func TestMarshalSession_ThinkingBlockNilSignatureOmitted(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "no-sig",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content: []pipe.ContentBlock{
+					pipe.ThinkingBlock{Thinking: "thoughts"},
+				},
+				StopReason: pipe.StopEndTurn,
+				Timestamp:  time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	// Parse raw JSON to verify signature field is absent
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	var msgs []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw["messages"], &msgs))
+	require.Len(t, msgs, 1)
+	var content []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(msgs[0]["content"], &content))
+	require.Len(t, content, 1)
+	assert.NotContains(t, content[0], "signature")
+}
+
 func TestMarshalSession_ToolCallComplexArguments(t *testing.T) {
 	t.Parallel()
 	complexArgs := json.RawMessage(`{"nested":{"key":"value"},"array":[1,2,3],"bool":true}`)

@@ -68,7 +68,8 @@ func (TextBlock) contentBlock() {}
 
 // ThinkingBlock contains thinking/reasoning content.
 type ThinkingBlock struct {
-	Thinking string
+	Thinking  string
+	Signature []byte
 }
 
 func (ThinkingBlock) contentBlock() {}
