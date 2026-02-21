@@ -54,7 +54,7 @@ func run() error {
 	defer stop()
 
 	// Resolve provider. Env vars are read here and passed as values.
-	provider, err := resolveProvider(ctx, *providerFlag, *apiKey,
+	provider, err := resolveProvider(*providerFlag, *apiKey,
 		os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("GEMINI_API_KEY"))
 	if err != nil {
 		return err

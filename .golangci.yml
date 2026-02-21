@@ -57,6 +57,9 @@ linters:
       - linters:
           - gochecknoglobals
         path: cmd/.*/main\.go
+      - linters:
+          - testpackage
+        path: export_test\.go
     paths:
       - third_party$
 
