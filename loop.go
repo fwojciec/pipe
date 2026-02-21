@@ -142,6 +142,23 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 			Timestamp:  time.Now(),
 		}
 		session.Messages = append(session.Messages, trm)
+
+		if cfg.onEvent != nil {
+			// Only text content is surfaced in the event; other block
+			// types (e.g. ImageBlock) are silently dropped by design.
+			var contentStr string
+			for _, b := range result.Content {
+				if tb, ok := b.(TextBlock); ok {
+					contentStr += tb.Text
+				}
+			}
+			cfg.onEvent(EventToolResult{
+				ID:       tc.ID,
+				ToolName: tc.Name,
+				Content:  contentStr,
+				IsError:  result.IsError,
+			})
+		}
 	}
 	session.UpdatedAt = time.Now()
 

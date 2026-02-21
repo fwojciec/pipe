@@ -415,6 +415,8 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		if b, ok := m.activeToolCall[e.Call.ID]; ok {
 			b.FinalizeWithCall(e.Call)
 		}
+	case pipe.EventToolResult:
+		m.blocks = append(m.blocks, NewToolResultBlock(e.ToolName, e.Content, e.IsError, m.styles))
 	}
 	return m
 }

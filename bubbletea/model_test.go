@@ -356,6 +356,29 @@ func TestModel_BlockFocusCycle(t *testing.T) {
 	})
 }
 
+func TestModel_ToolResultEvent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("EventToolResult creates ToolResultBlock during streaming", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Tool call first, then tool result event.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "file contents here", IsError: false}})
+		assert.Contains(t, m.View(), "file contents here")
+	})
+
+	t.Run("EventToolResult with error shows error styling", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "command failed", IsError: true}})
+		assert.Contains(t, m.View(), "command failed")
+	})
+}
+
 func TestModel_MultiTurnReset(t *testing.T) {
 	t.Parallel()
 
@@ -636,6 +659,40 @@ func TestModel_Teatest(t *testing.T) {
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("file contents here")) &&
 				bytes.Contains(out, []byte("read"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	})
+
+	t.Run("tool result event appears during agent run", func(t *testing.T) {
+		t.Parallel()
+
+		agent := func(_ context.Context, _ *pipe.Session, onEvent func(pipe.Event)) error {
+			onEvent(pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"})
+			onEvent(pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{
+				ID: "tc-1", Name: "bash", Arguments: json.RawMessage(`{"command":"echo hi"}`),
+			}})
+			onEvent(pipe.EventToolResult{ToolName: "bash", Content: "hi\n", IsError: false})
+			onEvent(pipe.EventTextDelta{Index: 0, Delta: "Done!"})
+			return nil
+		}
+
+		session := &pipe.Session{}
+		theme := pipe.DefaultTheme()
+		m := bt.New(agent, session, theme)
+
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
+
+		tm.Type("run it")
+		tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("hi")) &&
+				bytes.Contains(out, []byte("Done!")) &&
+				bytes.Contains(out, []byte("Enter to send"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

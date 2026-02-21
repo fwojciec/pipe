@@ -576,6 +576,119 @@ func TestLoop_Run(t *testing.T) {
 		require.Len(t, session.Messages, 1)
 	})
 
+	t.Run("event handler receives EventToolResult after tool execution", func(t *testing.T) {
+		t.Parallel()
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{"command":"echo hi"}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "done"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					return completedStream(toolCallMsg), nil
+				}
+				return completedStream(textMsg), nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return &pipe.ToolResult{
+					Content: []pipe.ContentBlock{pipe.TextBlock{Text: "hi\n"}},
+				}, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := pipe.NewLoop(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		// Should contain an EventToolResult for the bash tool.
+		var toolResults []pipe.EventToolResult
+		for _, e := range received {
+			if tr, ok := e.(pipe.EventToolResult); ok {
+				toolResults = append(toolResults, tr)
+			}
+		}
+		require.Len(t, toolResults, 1)
+		assert.Equal(t, "tc_1", toolResults[0].ID)
+		assert.Equal(t, "bash", toolResults[0].ToolName)
+		assert.Equal(t, "hi\n", toolResults[0].Content)
+		assert.False(t, toolResults[0].IsError)
+	})
+
+	t.Run("event handler receives EventToolResult with error", func(t *testing.T) {
+		t.Parallel()
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "I see"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					return completedStream(toolCallMsg), nil
+				}
+				return completedStream(textMsg), nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return nil, errors.New("process not found")
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := pipe.NewLoop(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		var toolResults []pipe.EventToolResult
+		for _, e := range received {
+			if tr, ok := e.(pipe.EventToolResult); ok {
+				toolResults = append(toolResults, tr)
+			}
+		}
+		require.Len(t, toolResults, 1)
+		assert.Equal(t, "tc_1", toolResults[0].ID)
+		assert.Equal(t, "bash", toolResults[0].ToolName)
+		assert.Equal(t, "process not found", toolResults[0].Content)
+		assert.True(t, toolResults[0].IsError)
+	})
+
 	t.Run("event handler receives events across multi-turn run", func(t *testing.T) {
 		t.Parallel()
 
@@ -653,7 +766,11 @@ func TestLoop_Run(t *testing.T) {
 		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
 		require.NoError(t, err)
 
-		allExpected := slices.Concat(turn1Events, turn2Events)
+		allExpected := slices.Concat(
+			turn1Events,
+			[]pipe.Event{pipe.EventToolResult{ID: "tc_1", ToolName: "bash", Content: "output", IsError: false}},
+			turn2Events,
+		)
 		assert.Equal(t, allExpected, received)
 	})
 

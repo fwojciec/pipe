@@ -44,6 +44,17 @@ func TestEventToolCallEnd_ImplementsEvent(t *testing.T) {
 	assert.NotNil(t, e)
 }
 
+func TestEventToolResult_ImplementsEvent(t *testing.T) {
+	t.Parallel()
+	var e pipe.Event = pipe.EventToolResult{
+		ID:       "tc_1",
+		ToolName: "bash",
+		Content:  "hello world",
+		IsError:  false,
+	}
+	assert.NotNil(t, e)
+}
+
 func TestEventTypeSwitch_Exhaustive(t *testing.T) {
 	t.Parallel()
 	events := []pipe.Event{
@@ -52,8 +63,9 @@ func TestEventTypeSwitch_Exhaustive(t *testing.T) {
 		pipe.EventToolCallBegin{ID: "tc_1", Name: "read"},
 		pipe.EventToolCallDelta{ID: "tc_1", Delta: `{"path":"`},
 		pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc_1", Name: "read"}},
+		pipe.EventToolResult{ID: "tc_1", ToolName: "bash", Content: "output", IsError: false},
 	}
-	assert.Len(t, events, 5, "update slice and switch when adding new Event types")
+	assert.Len(t, events, 6, "update slice and switch when adding new Event types")
 	for _, e := range events {
 		switch e.(type) {
 		case pipe.EventTextDelta:
@@ -61,6 +73,7 @@ func TestEventTypeSwitch_Exhaustive(t *testing.T) {
 		case pipe.EventToolCallBegin:
 		case pipe.EventToolCallDelta:
 		case pipe.EventToolCallEnd:
+		case pipe.EventToolResult:
 		default:
 			t.Fatalf("unexpected event type: %T", e)
 		}

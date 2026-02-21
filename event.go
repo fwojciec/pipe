@@ -49,6 +49,17 @@ type EventToolCallEnd struct {
 
 func (EventToolCallEnd) event() {}
 
+// EventToolResult carries a tool result back to the TUI during the agent loop.
+// It is emitted by the loop after each tool execution, not by providers.
+type EventToolResult struct {
+	ID       string
+	ToolName string
+	Content  string
+	IsError  bool
+}
+
+func (EventToolResult) event() {}
+
 // Interface compliance checks.
 var (
 	_ Event = EventTextDelta{}
@@ -56,4 +67,5 @@ var (
 	_ Event = EventToolCallBegin{}
 	_ Event = EventToolCallDelta{}
 	_ Event = EventToolCallEnd{}
+	_ Event = EventToolResult{}
 )
