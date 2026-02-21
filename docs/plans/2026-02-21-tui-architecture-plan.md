@@ -1321,6 +1321,7 @@ git commit -m "Add forked textarea with cache fix, auto-grow, and Ctrl+J newline
 - Modify: `bubbletea/model.go`
 - Modify: `bubbletea/bubbletea_test.go`
 - Modify: `bubbletea/model_test.go`
+- Modify: `cmd/pipe/main.go` (wiring for `make validate`)
 
 Replace the monolithic strings.Builder with `[]MessageBlock` and wire all components.
 
@@ -1514,11 +1515,14 @@ request (tool use → next assistant turn). Content indices restart at 0 each tu
 Turn boundary detection uses a `hadToolCalls bool` field on Model. Set to `true`
 on `EventToolCallBegin`. When any `EventTextDelta` or `EventThinkingDelta`
 arrives with `hadToolCalls == true`, a new turn has started — clear the text and
-thinking maps, reset the flag. This is correct because within a single assistant
-message, content ordering is always: thinking → text → tool calls (never
-text/thinking after tool calls). So text/thinking after `hadToolCalls` always
-means a new assistant message from a new turn. The tool call map is never
-cleared — IDs are globally unique.
+thinking maps, reset the flag.
+
+**Ordering assumption:** Within a single assistant message, content ordering is
+thinking → text → tool calls. Both Anthropic and Gemini enforce this — tool use
+blocks are always last. If a future provider emits text/thinking after tool calls
+within the same message, this logic would incorrectly treat it as a new turn.
+The assumption is documented in code comments so it's easy to find if this
+breaks. The tool call map is never cleared — IDs are globally unique.
 
 ```go
 func (m *Model) processEvent(evt pipe.Event) {
