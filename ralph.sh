@@ -94,8 +94,8 @@ while :; do
             else empty
             end
         ' 2>/dev/null
-    claude_exit=${PIPESTATUS[0]}
-    jq_exit=${PIPESTATUS[2]}
+    claude_exit=${PIPESTATUS[0]:-0}
+    jq_exit=${PIPESTATUS[2]:-0}
     set -e
 
     if [ "$claude_exit" -ne 0 ]; then
