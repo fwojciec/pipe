@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
 func stripANSI(s string) string {
-	return ansiEscape.ReplaceAllString(s, "")
+	// Matches SGR, cursor movement, and other CSI sequences.
+	re := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	return re.ReplaceAllString(s, "")
 }
 
 func TestMain(m *testing.M) {
