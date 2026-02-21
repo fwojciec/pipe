@@ -1488,6 +1488,7 @@ type Model struct {
 	activeText     map[int]*AssistantTextBlock  // keyed by EventTextDelta.Index
 	activeThinking map[int]*ThinkingBlock       // keyed by EventThinkingDelta.Index
 	activeToolCall map[string]*ToolCallBlock    // keyed by EventToolCall*.ID
+	hadToolCalls   bool                         // true after EventToolCallBegin, reset on new turn
 
 	running bool
 	cancel  context.CancelFunc
@@ -1508,19 +1509,24 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model
 
 Active text and thinking maps are per-turn. The loop runs multiple turns per user
 request (tool use → next assistant turn). Content indices restart at 0 each turn.
-We detect a new turn when we see `EventTextDelta{Index: 0}` or
-`EventThinkingDelta{Index: 0}` while the maps already have entries — this means
-a new assistant message started. Clear the text and thinking maps (tool call map
-persists — IDs are globally unique).
+
+Turn boundary detection uses a `hadToolCalls bool` field on Model. Set to `true`
+on `EventToolCallBegin`. When we see `EventTextDelta{Index: 0}` or
+`EventThinkingDelta{Index: 0}` with `hadToolCalls == true`, a new turn has
+started — clear the text and thinking maps, reset the flag. This is correct
+because tool calls always come at the end of a turn (the loop only continues if
+there are tool calls), so text/thinking after tool calls always means a new turn.
+The tool call map is never cleared — IDs are globally unique.
 
 ```go
 func (m *Model) processEvent(evt pipe.Event) {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
-		// Detect new turn: index 0 reappearing means new assistant message.
-		if e.Index == 0 && len(m.activeText) > 0 {
+		// Detect new turn: text after tool calls means new assistant message.
+		if m.hadToolCalls {
 			m.activeText = make(map[int]*AssistantTextBlock)
 			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.hadToolCalls = false
 		}
 		if b, ok := m.activeText[e.Index]; ok {
 			b.Append(e.Delta)
@@ -1531,10 +1537,11 @@ func (m *Model) processEvent(evt pipe.Event) {
 			m.activeText[e.Index] = b
 		}
 	case pipe.EventThinkingDelta:
-		// Detect new turn: index 0 reappearing means new assistant message.
-		if e.Index == 0 && len(m.activeThinking) > 0 {
+		// Detect new turn: thinking after tool calls means new assistant message.
+		if m.hadToolCalls {
 			m.activeText = make(map[int]*AssistantTextBlock)
 			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.hadToolCalls = false
 		}
 		if b, ok := m.activeThinking[e.Index]; ok {
 			b.Append(e.Delta)
@@ -1545,6 +1552,7 @@ func (m *Model) processEvent(evt pipe.Event) {
 			m.activeThinking[e.Index] = b
 		}
 	case pipe.EventToolCallBegin:
+		m.hadToolCalls = true
 		b := NewToolCallBlock(e.Name, e.ID, m.styles)
 		m.blocks = append(m.blocks, b)
 		m.activeToolCall[e.ID] = b
@@ -1590,6 +1598,7 @@ m.blocks = append(m.blocks, NewUserMessageBlock(text, m.styles))
 m.activeText = make(map[int]*AssistantTextBlock)
 m.activeThinking = make(map[int]*ThinkingBlock)
 m.activeToolCall = make(map[string]*ToolCallBlock)
+m.hadToolCalls = false
 ```
 
 **renderSession()** — creates blocks from session messages, including ToolResultMessage:
@@ -1626,7 +1635,7 @@ tuiModel := bt.New(agentFn, &session, theme)
 
 **Step 6: Run all tests, then `make validate`**
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add bubbletea/model.go bubbletea/bubbletea_test.go bubbletea/model_test.go cmd/pipe/main.go
@@ -1836,8 +1845,8 @@ Task 3 (Interface) ──┤                      ├── Task 6 (Thinking)
 
 Task 11 (Root Refactor) ── requires Tasks 1-9, 7b
 Task 12 (Input Swap) ── requires Tasks 10, 11
-Task 13 (Wiring) ── requires Task 11
-Task 14 (teatest) ── optional, requires Task 11
+Task 13 (Smoke Test) ── requires Task 12
+Task 14 (teatest) ── requires Task 11
 ```
 
 Tasks 4-7b can be done in any order (all depend on Tasks 1-3).

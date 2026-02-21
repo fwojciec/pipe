@@ -171,38 +171,43 @@ stale entries.
 - `CheckInputComplete` callback (from bubbline's concept) — Enter sends when
   callback returns true, otherwise inserts newline
 - Auto-grow up to MaxHeight (1-3 lines)
-- Shift+Enter / Ctrl+J always inserts newline
+- Ctrl+J always inserts newline (portable across all terminals)
 
 Lives in `bubbletea/textarea/` as owned code.
 
 ## Testing Strategy
 
-All tests use **teatest** with deterministic rendering.
+**Unit tests** (individual blocks, markdown, textarea) use direct `Update()` +
+`View()` calls — simple, fast, no async complexity.
+
+**Integration tests** (root model lifecycle, full agent cycle, session reload)
+use **teatest** with deterministic rendering for async behavior and full-render
+verification.
 
 **Infrastructure:**
 - `trueColorRenderer()` — forces deterministic color output
 - `TestTheme()` — stable ANSI color mapping
 - Helpers to initialize model, send messages, wait for output
 
-**Per-component tests:**
+**Per-component tests (direct Update/View):**
 
 | Component | Test focus |
 |-----------|-----------|
-| Root Model | Message routing, agent lifecycle, viewport scroll, session reload |
 | UserMessageBlock | `>` prefix, user color, word-wrapping |
 | AssistantTextBlock | Markdown rendering, streaming deltas, finalized block caching |
 | ThinkingBlock | Collapsible toggle, collapsed/expanded rendering |
 | ToolCallBlock | Collapsible toggle, tool name, arguments, result |
 | ErrorBlock | Error color, error text |
-| Chat Input | Typing, Enter sends, Shift+Enter newline, wrap, auto-grow |
+| Chat Input | Typing, Enter sends, Ctrl+J newline, wrap, auto-grow |
 | Markdown renderer | Each element: headings, code, bold, italic, lists, links |
 | Status bar | Idle, generating, error states |
 
-**Integration tests:** Full agent cycle with events, session reload with history,
-collapsible block interaction.
+**Integration tests (teatest):** Root model message routing, full agent cycle
+with events, session reload with history, collapsible block interaction,
+multi-turn event correlation.
 
 Current `model_test.go` tests get rewritten from direct Update + field inspection
-to teatest output assertions.
+to teatest output assertions for integration-level tests.
 
 ## References
 
