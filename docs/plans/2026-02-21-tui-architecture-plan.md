@@ -1117,6 +1117,7 @@ Port bubbles textarea, strip it, fix it.
 package textarea_test
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -1511,12 +1512,13 @@ Active text and thinking maps are per-turn. The loop runs multiple turns per use
 request (tool use → next assistant turn). Content indices restart at 0 each turn.
 
 Turn boundary detection uses a `hadToolCalls bool` field on Model. Set to `true`
-on `EventToolCallBegin`. When we see `EventTextDelta{Index: 0}` or
-`EventThinkingDelta{Index: 0}` with `hadToolCalls == true`, a new turn has
-started — clear the text and thinking maps, reset the flag. This is correct
-because tool calls always come at the end of a turn (the loop only continues if
-there are tool calls), so text/thinking after tool calls always means a new turn.
-The tool call map is never cleared — IDs are globally unique.
+on `EventToolCallBegin`. When any `EventTextDelta` or `EventThinkingDelta`
+arrives with `hadToolCalls == true`, a new turn has started — clear the text and
+thinking maps, reset the flag. This is correct because within a single assistant
+message, content ordering is always: thinking → text → tool calls (never
+text/thinking after tool calls). So text/thinking after `hadToolCalls` always
+means a new assistant message from a new turn. The tool call map is never
+cleared — IDs are globally unique.
 
 ```go
 func (m *Model) processEvent(evt pipe.Event) {

@@ -12,7 +12,7 @@ than rendered output verification.
 ## Decisions
 
 - **Tree-of-models** component architecture (each UI element is its own model)
-- **teatest** for all TUI testing (rendered output, not field inspection)
+- **teatest** for integration testing; direct Update/View for unit tests
 - **Full 8-element** UI scope (user msg, assistant text, thinking, tool call, tool result, error, status bar, input)
 - **Custom goldmark ANSI renderer** for markdown (~300-400 LOC)
 - **ANSI-derived theming** mapped to terminal's base 16 colors (Ghostty-optimized)
