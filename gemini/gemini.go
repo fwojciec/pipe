@@ -6,6 +6,6 @@
 package gemini
 
 const (
-	defaultModel     = "gemini-3.1-pro-preview" //nolint:unused // used by Client in next issue
-	defaultMaxTokens = 65536                    //nolint:unused // used by Client in next issue
+	defaultModel     = "gemini-3.1-pro-preview"
+	defaultMaxTokens = 65536
 )
