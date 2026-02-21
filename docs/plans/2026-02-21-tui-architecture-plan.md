@@ -1218,18 +1218,47 @@ func TestTextarea_CheckInputComplete(t *testing.T) {
 func TestTextarea_AutoGrow(t *testing.T) {
 	t.Parallel()
 
-	t.Run("height increases with content", func(t *testing.T) {
+	t.Run("height increases with content and emits InputHeightMsg", func(t *testing.T) {
 		t.Parallel()
 		ta := textarea.New()
 		ta.SetWidth(80)
 		ta.SetHeight(1)
 		ta.MaxHeight = 3
 		ta.Focus()
-		ta.SetValue("line1\nline2")
-		// After setting multi-line content, visible height should grow.
+
+		// Type first line — no height change expected.
+		for _, r := range "line1" {
+			ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+
+		// Insert newline — triggers auto-grow from height 1 to 2.
+		updated, cmd := ta.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+		ta = updated.(textarea.Model)
+
+		// Must emit InputHeightMsg with new height.
+		require.NotNil(t, cmd)
+		msg := cmd()
+		heightMsg, ok := msg.(textarea.InputHeightMsg)
+		require.True(t, ok, "expected InputHeightMsg, got %T", msg)
+		assert.Equal(t, 2, heightMsg.Height)
+
+		// Both lines visible.
 		view := ta.View()
 		assert.Contains(t, view, "line1")
-		assert.Contains(t, view, "line2")
+	})
+
+	t.Run("does not exceed MaxHeight", func(t *testing.T) {
+		t.Parallel()
+		ta := textarea.New()
+		ta.SetWidth(80)
+		ta.SetHeight(1)
+		ta.MaxHeight = 2
+		ta.Focus()
+		ta.SetValue("line1\nline2\nline3")
+		// View should show content but height capped at MaxHeight.
+		view := ta.View()
+		lines := strings.Split(view, "\n")
+		assert.LessOrEqual(t, len(lines), 2)
 	})
 }
 
@@ -1406,6 +1435,25 @@ func TestModel_BlockToggle(t *testing.T) {
 	})
 }
 
+func TestModel_MultiTurnReset(t *testing.T) {
+	t.Parallel()
+
+	t.Run("second turn text index 0 creates new block", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Turn 1: text at index 0.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "turn1"}})
+		// Tool call ends turn 1.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		// Turn 2: text at index 0 again — must create a NEW block, not append to turn 1's.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "turn2"}})
+		view := m.View()
+		assert.Contains(t, view, "turn1")
+		assert.Contains(t, view, "turn2")
+	})
+}
+
 // updateModel is a test helper that sends a message and returns the updated Model.
 func updateModel(t *testing.T, m bt.Model, msg tea.Msg) bt.Model {
 	t.Helper()
@@ -1458,10 +1506,22 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model
 
 **processEvent()** — uses Index/ID for correlation:
 
+Active text and thinking maps are per-turn. The loop runs multiple turns per user
+request (tool use → next assistant turn). Content indices restart at 0 each turn.
+We detect a new turn when we see `EventTextDelta{Index: 0}` or
+`EventThinkingDelta{Index: 0}` while the maps already have entries — this means
+a new assistant message started. Clear the text and thinking maps (tool call map
+persists — IDs are globally unique).
+
 ```go
 func (m *Model) processEvent(evt pipe.Event) {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
+		// Detect new turn: index 0 reappearing means new assistant message.
+		if e.Index == 0 && len(m.activeText) > 0 {
+			m.activeText = make(map[int]*AssistantTextBlock)
+			m.activeThinking = make(map[int]*ThinkingBlock)
+		}
 		if b, ok := m.activeText[e.Index]; ok {
 			b.Append(e.Delta)
 		} else {
@@ -1471,6 +1531,11 @@ func (m *Model) processEvent(evt pipe.Event) {
 			m.activeText[e.Index] = b
 		}
 	case pipe.EventThinkingDelta:
+		// Detect new turn: index 0 reappearing means new assistant message.
+		if e.Index == 0 && len(m.activeThinking) > 0 {
+			m.activeText = make(map[int]*AssistantTextBlock)
+			m.activeThinking = make(map[int]*ThinkingBlock)
+		}
 		if b, ok := m.activeThinking[e.Index]; ok {
 			b.Append(e.Delta)
 		} else {
@@ -1488,7 +1553,7 @@ func (m *Model) processEvent(evt pipe.Event) {
 			b.AppendArgs(e.Delta)
 		}
 	case pipe.EventToolCallEnd:
-		if b, ok := m.activeToolCall[e.ID]; ok {
+		if b, ok := m.activeToolCall[e.Call.ID]; ok {
 			b.FinalizeWithCall(e.Call)
 		}
 	}
@@ -1507,8 +1572,14 @@ case tea.KeyTab:
 	}
 ```
 
-Focus navigation (up/down arrows when not in input) is deferred to a follow-up.
-For MVP, blockFocus defaults to the last collapsible block. Tab toggles it.
+**Block focus rules** (deterministic, no user navigation for MVP):
+- `blockFocus` is updated every time a block is appended to `m.blocks`
+- After append: scan backwards from the end to find the last collapsible block
+  (ThinkingBlock or ToolCallBlock). Set `blockFocus` to that index, or -1 if none.
+- On `AgentDoneMsg`: recalculate `blockFocus` (same backwards scan).
+- Tab only operates when `blockFocus >= 0`.
+- Focus navigation (up/down arrows to move between collapsible blocks) is deferred
+  to a follow-up.
 
 **handleWindowSize()** — unchanged height calculation.
 
@@ -1543,12 +1614,22 @@ case pipe.ToolResultMessage:
 - Remove `BlockCount()` — tests use `View()` content assertions instead
 - Update `SetRunning` / `SetRunningWithCancel` for new struct (active maps initialized)
 
-**Step 5: Run all tests, then `make validate`**
+**Step 5: Update cmd/pipe/main.go wiring**
+
+`make validate` includes building `cmd/pipe/`, so the wiring must update here
+to keep the build green. Update the `New()` call:
+
+```go
+theme := pipe.DefaultTheme()
+tuiModel := bt.New(agentFn, &session, theme)
+```
+
+**Step 6: Run all tests, then `make validate`**
 
 **Step 6: Commit**
 
 ```bash
-git add bubbletea/model.go bubbletea/bubbletea_test.go bubbletea/model_test.go
+git add bubbletea/model.go bubbletea/bubbletea_test.go bubbletea/model_test.go cmd/pipe/main.go
 git commit -m "Refactor root model to tree-of-models with Index/ID event correlation"
 ```
 
@@ -1635,21 +1716,12 @@ git commit -m "Swap input to forked textarea for multi-line support"
 
 ---
 
-### Task 13: Update cmd/pipe Wiring
+### Task 13: Manual Smoke Test
 
 **Files:**
-- Modify: `cmd/pipe/main.go`
+- None (wiring was done in Task 11)
 
-**Step 1: Update the New() call to pass theme**
-
-```go
-theme := pipe.DefaultTheme()
-tuiModel := bt.New(agentFn, &session, theme)
-```
-
-**Step 2: Run `make validate`**
-
-**Step 3: Manual smoke test**
+**Step 1: Manual smoke test**
 
 ```bash
 go run ./cmd/pipe/
@@ -1667,23 +1739,21 @@ Verify:
 - Input auto-grows with multi-line content
 - Viewport adjusts when input height changes
 
-**Step 4: Commit**
-
-```bash
-git add cmd/pipe/main.go
-git commit -m "Wire theme into TUI startup"
-```
+No commit needed — this is verification only.
 
 ---
 
-### Task 14: Migrate Tests to teatest (Optional Enhancement)
+### Task 14: Migrate Integration Tests to teatest
 
 **Files:**
 - Modify: `bubbletea/model_test.go`
 - Modify: `bubbletea/bubbletea_test.go`
 
-Optional — direct Update/View testing from earlier tasks provides good coverage.
-teatest adds value for async and full-render verification.
+Unit tests (individual blocks) keep direct Update/View testing — it's simpler and
+sufficient. Integration tests (root model lifecycle, full agent cycle) migrate to
+teatest for async behavior and full-render verification. This aligns with the
+design doc's "all tests use teatest" by making teatest the standard for
+integration-level testing.
 
 **Step 1: Add teatest dependency**
 
