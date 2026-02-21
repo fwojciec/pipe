@@ -979,6 +979,7 @@ import (
 
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
+	"github.com/fwojciec/pipe/markdown"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -1038,6 +1039,27 @@ func TestAssistantTextBlock_View(t *testing.T) {
 		narrow := block.View(20)
 		wide := block.View(80)
 		assert.NotEqual(t, strings.Count(narrow, "\n"), strings.Count(wide, "\n"))
+	})
+
+	t.Run("content ending at paragraph boundary has no spurious whitespace", func(t *testing.T) {
+		t.Parallel()
+		theme := pipe.DefaultTheme()
+		styles := bt.NewStyles(theme)
+		block := bt.NewAssistantTextBlock(theme, styles)
+		block.Append("complete paragraph\n\n")
+		view := block.View(80)
+		// The finalized content should render cleanly with no extra blank
+		// lines from an empty trailing fragment.
+		assert.Contains(t, view, "complete paragraph")
+		// promoteFinalized strips the "\n\n" delimiter, so finalizedRaw is
+		// "complete paragraph" (without trailing newlines). We compare
+		// against the same input to match what renderFinalized produces.
+		// TrimRight on both sides normalises renderer-added trailing
+		// newlines which are not semantically significant.
+		trimmed := strings.TrimRight(view, "\n")
+		assert.Equal(t, trimmed, strings.TrimRight(
+			markdown.Render("complete paragraph", 80, theme), "\n",
+		))
 	})
 
 	t.Run("unclosed fenced code block renders safely", func(t *testing.T) {
@@ -1104,14 +1126,27 @@ func (b *AssistantTextBlock) View(width int) string {
 		// Close fence only for rendering so partial streams display safely.
 		trailing += "\n```"
 	}
+	// Empty trailing text (content ends exactly at "\n\n") should not be
+	// passed to the renderer — some renderers return whitespace for empty
+	// input, which would append spurious blank lines after finalized content.
+	if trailing == "" {
+		return finalizedRendered
+	}
 	trailingRendered := markdown.Render(trailing, width, b.theme)
+	// Whitespace-only trailing input (e.g. " ") may render to whitespace;
+	// treat it the same as empty to avoid spurious blank lines.
+	if strings.TrimSpace(trailingRendered) == "" {
+		return finalizedRendered
+	}
 	switch {
 	case finalizedRendered == "":
 		return trailingRendered
-	case trailingRendered == "":
-		return finalizedRendered
 	default:
-		return finalizedRendered + "\n\n" + trailingRendered
+		// Trim trailing/leading whitespace from independently-rendered
+		// fragments to avoid a visible seam (extra blank lines) at the
+		// finalization boundary. The paragraph break is reconstructed
+		// with a single "\n\n" to match full-document render output.
+		return strings.TrimRight(finalizedRendered, "\n") + "\n\n" + strings.TrimLeft(trailingRendered, "\n")
 	}
 }
 
@@ -1150,6 +1185,11 @@ func (b *AssistantTextBlock) trailingRaw() string {
 	return strings.TrimPrefix(raw, prefix)
 }
 
+// hasUnclosedFence detects whether s contains an unclosed fenced code block
+// by checking for an odd number of "```" occurrences. This uses a simple
+// substring count which does not distinguish triple backticks inside inline
+// code spans (e.g., `foo ``` bar`). In practice LLM streaming output rarely
+// contains literal triple backticks in inline code, so this is acceptable.
 func hasUnclosedFence(s string) bool {
 	return strings.Count(s, "```")%2 == 1
 }
