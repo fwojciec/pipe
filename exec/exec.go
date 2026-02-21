@@ -1,5 +1,5 @@
-// Package command provides the bash command execution tool.
-package command
+// Package exec provides the bash command execution tool.
+package exec
 
 import "github.com/fwojciec/pipe"
 
