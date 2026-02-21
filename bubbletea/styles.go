@@ -1,0 +1,41 @@
+package bubbletea
+
+import (
+	"strconv"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/fwojciec/pipe"
+)
+
+// Styles maps a Theme to lipgloss styles for TUI rendering.
+type Styles struct {
+	UserMsg  lipgloss.Style
+	Thinking lipgloss.Style
+	ToolCall lipgloss.Style
+	Error    lipgloss.Style
+	Success  lipgloss.Style
+	Muted    lipgloss.Style
+	Accent   lipgloss.Style
+	CodeBg   lipgloss.Style
+}
+
+// NewStyles creates Styles from a Theme.
+func NewStyles(t pipe.Theme) Styles {
+	return Styles{
+		UserMsg:  lipgloss.NewStyle().Foreground(ansiColor(t.UserMsg)).Bold(true),
+		Thinking: lipgloss.NewStyle().Foreground(ansiColor(t.Thinking)).Faint(true),
+		ToolCall: lipgloss.NewStyle().Foreground(ansiColor(t.ToolCall)),
+		Error:    lipgloss.NewStyle().Foreground(ansiColor(t.Error)),
+		Success:  lipgloss.NewStyle().Foreground(ansiColor(t.Success)),
+		Muted:    lipgloss.NewStyle().Foreground(ansiColor(t.Muted)).Faint(true),
+		Accent:   lipgloss.NewStyle().Foreground(ansiColor(t.Accent)).Bold(true),
+		CodeBg:   lipgloss.NewStyle().Background(ansiColor(t.CodeBg)),
+	}
+}
+
+func ansiColor(index int) lipgloss.TerminalColor {
+	if index < 0 {
+		return lipgloss.NoColor{}
+	}
+	return lipgloss.Color(strconv.Itoa(index))
+}
