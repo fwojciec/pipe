@@ -883,6 +883,31 @@ func TestStream_ToolCallNilArgs(t *testing.T) {
 	assert.Equal(t, json.RawMessage("{}"), call.Arguments)
 }
 
+func TestStream_PromptBlocked(t *testing.T) {
+	t.Parallel()
+	// When a prompt is blocked for safety, PromptFeedback is set with zero
+	// candidates. The stream should surface this as an error, not a normal
+	// empty turn.
+	chunks := []*genai.GenerateContentResponse{
+		{
+			PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+				BlockReason: genai.BlockedReasonSafety,
+			},
+			// No Candidates — blocked prompt.
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks))
+	_, err := s.Next()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prompt blocked")
+
+	assert.Equal(t, pipe.StreamStateError, s.State())
+	msg, _ := s.Message()
+	assert.Equal(t, pipe.StopError, msg.StopReason)
+	assert.Equal(t, "SAFETY", msg.RawStopReason)
+}
+
 func TestStream_ProcessPartMarshalError(t *testing.T) {
 	t.Parallel()
 	chunks := []*genai.GenerateContentResponse{

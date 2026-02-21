@@ -139,7 +139,9 @@ func (s *stream) terminate(err error) {
 	if s.ctx.Err() != nil {
 		s.msg.StopReason = pipe.StopAborted
 		s.msg.RawStopReason = "aborted"
-	} else {
+	} else if s.msg.StopReason != pipe.StopError {
+		// Preserve StopError if already set (e.g. blocked prompt), but
+		// overwrite non-error reasons like StopEndTurn.
 		s.msg.StopReason = pipe.StopError
 		s.msg.RawStopReason = "error"
 	}
@@ -173,6 +175,13 @@ func (s *stream) processChunk(resp *genai.GenerateContentResponse) error {
 			OutputTokens:    int(resp.UsageMetadata.CandidatesTokenCount),
 			CacheReadTokens: cached,
 		}
+	}
+
+	// A blocked prompt arrives with PromptFeedback and zero candidates.
+	if resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != "" && len(resp.Candidates) == 0 {
+		s.msg.StopReason = pipe.StopError
+		s.msg.RawStopReason = string(resp.PromptFeedback.BlockReason)
+		return fmt.Errorf("prompt blocked: %s", resp.PromptFeedback.BlockReason)
 	}
 
 	if len(resp.Candidates) == 0 {
