@@ -8,10 +8,21 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
+	"strings"
 
 	"github.com/fwojciec/pipe"
 	"google.golang.org/genai"
 )
+
+type streamError string
+
+func (e streamError) Error() string { return string(e) }
+
+// ErrStreamClosed is returned by [stream.Next] after [stream.Close] has been
+// called. Callers can distinguish a closed stream from a completed one
+// (io.EOF) or an error (wrapped in the returned error).
+const ErrStreamClosed streamError = "gemini: stream closed"
 
 // stream implements [pipe.Stream] by wrapping the genai SDK's streaming iterator.
 // Each SDK chunk can contain multiple Parts that map to different event types
@@ -34,14 +45,14 @@ type stream struct {
 // blockState tracks accumulation for a single content block.
 type blockState struct {
 	blockType string // "thinking", "text", "tool_call"
-	textBuf   string
+	textBuf   strings.Builder
 	signature []byte
 }
 
 // Interface compliance check.
 var _ pipe.Stream = (*stream)(nil)
 
-func newStream(ctx context.Context, iterFn iter.Seq2[*genai.GenerateContentResponse, error], _ []*genai.Content) *stream {
+func newStream(ctx context.Context, iterFn iter.Seq2[*genai.GenerateContentResponse, error]) *stream {
 	next, stop := iter.Pull2(iterFn)
 	return &stream{
 		ctx:   ctx,
@@ -51,11 +62,6 @@ func newStream(ctx context.Context, iterFn iter.Seq2[*genai.GenerateContentRespo
 	}
 }
 
-// NewStreamFromIter creates a stream from an iter.Seq2. Exported for testing.
-func NewStreamFromIter(ctx context.Context, iterFn iter.Seq2[*genai.GenerateContentResponse, error], contents []*genai.Content) pipe.Stream {
-	return newStream(ctx, iterFn, contents)
-}
-
 func (s *stream) Next() (pipe.Event, error) {
 	switch s.state {
 	case pipe.StreamStateComplete:
@@ -63,7 +69,7 @@ func (s *stream) Next() (pipe.Event, error) {
 	case pipe.StreamStateError:
 		return nil, s.err
 	case pipe.StreamStateClosed:
-		return nil, fmt.Errorf("gemini: stream closed")
+		return nil, ErrStreamClosed
 	}
 
 	for {
@@ -97,7 +103,10 @@ func (s *stream) Next() (pipe.Event, error) {
 			continue
 		}
 
-		s.processChunk(resp)
+		if err := s.processChunk(resp); err != nil {
+			s.terminate(err)
+			return nil, s.err
+		}
 		// Loop back to check pending events.
 	}
 }
@@ -114,7 +123,7 @@ func (s *stream) Message() (pipe.AssistantMessage, error) {
 }
 
 func (s *stream) Close() error {
-	if s.state != pipe.StreamStateComplete && s.state != pipe.StreamStateError {
+	if s.state != pipe.StreamStateComplete && s.state != pipe.StreamStateError && s.state != pipe.StreamStateClosed {
 		s.state = pipe.StreamStateClosed
 		s.msg.StopReason = pipe.StopAborted
 		s.msg.RawStopReason = "aborted"
@@ -126,6 +135,7 @@ func (s *stream) Close() error {
 func (s *stream) terminate(err error) {
 	s.state = pipe.StreamStateError
 	s.err = fmt.Errorf("gemini: %w", err)
+	s.stop() // Release iter.Pull2 goroutine.
 	if s.ctx.Err() != nil {
 		s.msg.StopReason = pipe.StopAborted
 		s.msg.RawStopReason = "aborted"
@@ -137,15 +147,23 @@ func (s *stream) terminate(err error) {
 
 func (s *stream) finalize() {
 	s.state = pipe.StreamStateComplete
-	if s.hasToolCall {
+	s.stop() // Release iter.Pull2 goroutine (idempotent).
+	if s.hasToolCall && (s.msg.StopReason == "" || s.msg.StopReason == pipe.StopEndTurn) {
 		s.msg.StopReason = pipe.StopToolUse
 		s.msg.RawStopReason = "tool_use"
+	} else if s.msg.StopReason == "" {
+		s.msg.StopReason = pipe.StopEndTurn
+		s.msg.RawStopReason = "end_turn"
 	}
 }
 
-func (s *stream) processChunk(resp *genai.GenerateContentResponse) {
+func (s *stream) processChunk(resp *genai.GenerateContentResponse) error {
+	// UsageMetadata is overwritten (not accumulated) because the Gemini SDK
+	// provides cumulative totals in the final chunk, not incremental deltas.
 	if resp.UsageMetadata != nil {
 		cached := int(resp.UsageMetadata.CachedContentTokenCount)
+		// PromptTokenCount includes CachedContentTokenCount; subtract to get
+		// non-cached input tokens. Guard below handles SDK semantic changes.
 		input := int(resp.UsageMetadata.PromptTokenCount) - cached
 		if input < 0 {
 			input = 0
@@ -158,7 +176,7 @@ func (s *stream) processChunk(resp *genai.GenerateContentResponse) {
 	}
 
 	if len(resp.Candidates) == 0 {
-		return
+		return nil
 	}
 	candidate := resp.Candidates[0]
 
@@ -168,27 +186,41 @@ func (s *stream) processChunk(resp *genai.GenerateContentResponse) {
 	}
 
 	if candidate.Content == nil {
-		return
+		return nil
 	}
 
 	for _, part := range candidate.Content.Parts {
-		s.processPart(part)
+		if err := s.processPart(part); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (s *stream) processPart(part *genai.Part) {
+func (s *stream) processPart(part *genai.Part) error {
 	switch {
 	case part.FunctionCall != nil:
 		s.hasToolCall = true
-		args, _ := json.Marshal(part.FunctionCall.Args)
+		args := part.FunctionCall.Args
+		if args == nil {
+			args = map[string]any{}
+		}
+		rawArgs, err := json.Marshal(args)
+		if err != nil {
+			return fmt.Errorf("invalid tool call arguments: %w", err)
+		}
 		id := part.FunctionCall.ID
 		if id == "" {
-			id = generateToolCallID()
+			var err error
+			id, err = generateToolCallID()
+			if err != nil {
+				return fmt.Errorf("processing function call: %w", err)
+			}
 		}
 		call := pipe.ToolCallBlock{
 			ID:        id,
 			Name:      part.FunctionCall.Name,
-			Arguments: json.RawMessage(args),
+			Arguments: json.RawMessage(rawArgs),
 		}
 		s.msg.Content = append(s.msg.Content, call)
 		s.blocks = append(s.blocks, &blockState{blockType: "tool_call"})
@@ -197,18 +229,14 @@ func (s *stream) processPart(part *genai.Part) {
 			pipe.EventToolCallEnd{Call: call},
 		)
 
-	case part.Thought && (part.Text != "" || len(part.ThoughtSignature) > 0):
+	case part.Thought:
 		idx := s.currentBlockIndex("thinking")
 		bs := s.blocks[idx]
-		bs.textBuf += part.Text
+		bs.textBuf.WriteString(part.Text)
 		if len(part.ThoughtSignature) > 0 {
 			bs.signature = append(bs.signature, part.ThoughtSignature...)
 		}
-		var sig []byte
-		if len(bs.signature) > 0 {
-			sig = bs.signature
-		}
-		s.msg.Content[idx] = pipe.ThinkingBlock{Thinking: bs.textBuf, Signature: sig}
+		s.msg.Content[idx] = pipe.ThinkingBlock{Thinking: bs.textBuf.String(), Signature: slices.Clone(bs.signature)}
 		if part.Text != "" {
 			s.pending = append(s.pending, pipe.EventThinkingDelta{Index: idx, Delta: part.Text})
 		}
@@ -216,10 +244,11 @@ func (s *stream) processPart(part *genai.Part) {
 	case part.Text != "":
 		idx := s.currentBlockIndex("text")
 		bs := s.blocks[idx]
-		bs.textBuf += part.Text
-		s.msg.Content[idx] = pipe.TextBlock{Text: bs.textBuf}
+		bs.textBuf.WriteString(part.Text)
+		s.msg.Content[idx] = pipe.TextBlock{Text: bs.textBuf.String()}
 		s.pending = append(s.pending, pipe.EventTextDelta{Index: idx, Delta: part.Text})
 	}
+	return nil
 }
 
 // currentBlockIndex returns the index of the current block if it matches the
@@ -257,8 +286,10 @@ func mapFinishReason(reason genai.FinishReason) pipe.StopReason {
 
 // generateToolCallID generates a unique fallback ID for tool calls
 // when the SDK doesn't provide one.
-func generateToolCallID() string {
+func generateToolCallID() (string, error) {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return "call_" + hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating tool call ID: %w", err)
+	}
+	return "call_" + hex.EncodeToString(b), nil
 }

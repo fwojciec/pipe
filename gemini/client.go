@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 
 	"github.com/fwojciec/pipe"
 	"google.golang.org/genai"
@@ -53,22 +55,40 @@ func (c *Client) Stream(ctx context.Context, req pipe.Request) (pipe.Stream, err
 		model = c.model
 	}
 
-	contents := ConvertMessages(req.Messages)
-	config := buildConfig(req)
+	contents, err := ConvertMessages(req.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: %w", err)
+	}
+	config, err := buildConfig(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: %w", err)
+	}
 
 	iter := c.client.Models.GenerateContentStream(ctx, model, contents, config)
-	return newStream(ctx, iter, contents), nil
+	return newStream(ctx, iter), nil
 }
 
-func buildConfig(req pipe.Request) *genai.GenerateContentConfig {
+func buildConfig(req pipe.Request) (*genai.GenerateContentConfig, error) {
 	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = defaultMaxTokens
 	}
 
+	if maxTokens > math.MaxInt32 {
+		maxTokens = math.MaxInt32
+	}
+
+	tools, err := ConvertTools(req.Tools)
+	if err != nil {
+		return nil, err
+	}
+
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(maxTokens),
-		Tools:           ConvertTools(req.Tools),
+		MaxOutputTokens: int32(maxTokens), //nolint:gosec // clamped above
+		Tools:           tools,
+		// ThinkingConfig is set unconditionally; models that don't support
+		// thinking will reject the request. Callers should use a
+		// thinking-capable model (e.g. gemini-3.1-pro-preview).
 		ThinkingConfig: &genai.ThinkingConfig{
 			IncludeThoughts: true,
 		},
@@ -85,24 +105,32 @@ func buildConfig(req pipe.Request) *genai.GenerateContentConfig {
 		config.Temperature = &temp
 	}
 
-	return config
+	return config, nil
 }
 
 // ConvertMessages converts pipe Messages to genai Contents.
 // Exported for testing.
-func ConvertMessages(msgs []pipe.Message) []*genai.Content {
+func ConvertMessages(msgs []pipe.Message) ([]*genai.Content, error) {
 	var result []*genai.Content
 	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case pipe.UserMessage:
+			parts, err := convertParts(m.Content)
+			if err != nil {
+				return nil, fmt.Errorf("user message: %w", err)
+			}
 			result = append(result, &genai.Content{
 				Role:  "user",
-				Parts: convertParts(m.Content),
+				Parts: parts,
 			})
 		case pipe.AssistantMessage:
+			parts, err := convertParts(m.Content)
+			if err != nil {
+				return nil, fmt.Errorf("assistant message: %w", err)
+			}
 			result = append(result, &genai.Content{
 				Role:  "model",
-				Parts: convertParts(m.Content),
+				Parts: parts,
 			})
 		case pipe.ToolResultMessage:
 			text := extractText(m.Content)
@@ -122,12 +150,14 @@ func ConvertMessages(msgs []pipe.Message) []*genai.Content {
 					},
 				}},
 			})
+		default:
+			return nil, fmt.Errorf("unsupported message type: %T", msg)
 		}
 	}
-	return result
+	return result, nil
 }
 
-func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
+func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 	var parts []*genai.Part
 	for _, b := range blocks {
 		switch bl := b.(type) {
@@ -140,9 +170,10 @@ func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
 			}
 			parts = append(parts, p)
 		case pipe.ToolCallBlock:
-			// Arguments is json.RawMessage — always valid JSON from domain types.
 			var args map[string]any
-			_ = json.Unmarshal(bl.Arguments, &args)
+			if err := json.Unmarshal(bl.Arguments, &args); err != nil {
+				return nil, fmt.Errorf("invalid tool call arguments JSON: %w", err)
+			}
 			parts = append(parts, &genai.Part{
 				FunctionCall: &genai.FunctionCall{
 					ID:   bl.ID,
@@ -157,37 +188,42 @@ func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
 					Data:     bl.Data,
 				},
 			})
+		default:
+			return nil, fmt.Errorf("unsupported content block type: %T", b)
 		}
 	}
-	return parts
+	return parts, nil
 }
 
-// extractText returns the text of the first TextBlock, or empty string if none.
+// extractText returns the concatenated text of all TextBlocks, separated by
+// newlines. Returns empty string if no TextBlocks are present.
 func extractText(blocks []pipe.ContentBlock) string {
+	var parts []string
 	for _, b := range blocks {
 		if tb, ok := b.(pipe.TextBlock); ok {
-			return tb.Text
+			parts = append(parts, tb.Text)
 		}
 	}
-	return ""
+	return strings.Join(parts, "\n")
 }
 
 // ConvertTools converts pipe Tools to genai Tools.
 // Exported for testing.
-func ConvertTools(tools []pipe.Tool) []*genai.Tool {
+func ConvertTools(tools []pipe.Tool) ([]*genai.Tool, error) {
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
 	decls := make([]*genai.FunctionDeclaration, len(tools))
 	for i, t := range tools {
-		// Parameters is json.RawMessage — always valid JSON from domain types.
 		var schema map[string]any
-		_ = json.Unmarshal(t.Parameters, &schema)
+		if err := json.Unmarshal(t.Parameters, &schema); err != nil {
+			return nil, fmt.Errorf("invalid tool parameters JSON for %q: %w", t.Name, err)
+		}
 		decls[i] = &genai.FunctionDeclaration{
 			Name:                 t.Name,
 			Description:          t.Description,
 			ParametersJsonSchema: schema,
 		}
 	}
-	return []*genai.Tool{{FunctionDeclarations: decls}}
+	return []*genai.Tool{{FunctionDeclarations: decls}}, nil
 }

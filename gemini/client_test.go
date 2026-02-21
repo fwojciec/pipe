@@ -15,7 +15,8 @@ func TestConvertMessages_UserMessage(t *testing.T) {
 	msgs := []pipe.Message{
 		pipe.UserMessage{Content: []pipe.ContentBlock{pipe.TextBlock{Text: "Hello"}}},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "user", got[0].Role)
 	require.Len(t, got[0].Parts, 1)
@@ -29,7 +30,8 @@ func TestConvertMessages_AssistantMessage(t *testing.T) {
 			pipe.TextBlock{Text: "Let me help."},
 		}},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "model", got[0].Role)
 	require.Len(t, got[0].Parts, 1)
@@ -45,7 +47,8 @@ func TestConvertMessages_ThinkingWithSignature(t *testing.T) {
 			pipe.TextBlock{Text: "Answer"},
 		}},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Parts, 2)
 	assert.Equal(t, "reasoning", got[0].Parts[0].Text)
@@ -66,7 +69,8 @@ func TestConvertMessages_ToolCallAndResult(t *testing.T) {
 			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "file contents"}},
 		},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 2)
 
 	// Assistant with tool call — ID passed through.
@@ -99,7 +103,8 @@ func TestConvertMessages_ToolResultError(t *testing.T) {
 			IsError:    true,
 		},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 2)
 
 	// Error result — uses "error" key.
@@ -116,7 +121,8 @@ func TestConvertMessages_ImageBlock(t *testing.T) {
 			pipe.ImageBlock{Data: []byte("PNG"), MimeType: "image/png"},
 		}},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Parts, 1)
 	require.NotNil(t, got[0].Parts[0].InlineData)
@@ -130,7 +136,8 @@ func TestConvertTools(t *testing.T) {
 		{Name: "read", Description: "Read a file", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`)},
 		{Name: "bash", Description: "Run a command", Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string"}}}`)},
 	}
-	got := gemini.ConvertTools(tools)
+	got, err := gemini.ConvertTools(tools)
+	require.NoError(t, err)
 	require.Len(t, got, 1) // single genai.Tool with multiple declarations
 	require.Len(t, got[0].FunctionDeclarations, 2)
 	assert.Equal(t, "read", got[0].FunctionDeclarations[0].Name)
@@ -140,8 +147,55 @@ func TestConvertTools(t *testing.T) {
 
 func TestConvertTools_Empty(t *testing.T) {
 	t.Parallel()
-	got := gemini.ConvertTools(nil)
+	got, err := gemini.ConvertTools(nil)
+	require.NoError(t, err)
 	assert.Nil(t, got)
+}
+
+func TestConvertMessages_InvalidToolCallJSON(t *testing.T) {
+	t.Parallel()
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "call_bad", Name: "read", Arguments: json.RawMessage(`{bad}`)},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "assistant message")
+	assert.Contains(t, err.Error(), "invalid tool call arguments JSON")
+}
+
+func TestConvertTools_InvalidParametersJSON(t *testing.T) {
+	t.Parallel()
+	tools := []pipe.Tool{
+		{Name: "broken", Description: "Bad tool", Parameters: json.RawMessage(`not json`)},
+	}
+	got, err := gemini.ConvertTools(tools)
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), `"broken"`)
+	assert.Contains(t, err.Error(), "invalid tool parameters JSON")
+}
+
+func TestConvertMessages_ToolResultMultipleTextBlocks(t *testing.T) {
+	t.Parallel()
+	msgs := []pipe.Message{
+		pipe.ToolResultMessage{
+			ToolCallID: "call_multi",
+			ToolName:   "bash",
+			Content: []pipe.ContentBlock{
+				pipe.TextBlock{Text: "line one"},
+				pipe.TextBlock{Text: "line two"},
+				pipe.TextBlock{Text: "line three"},
+			},
+		},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	resp := got[0].Parts[0].FunctionResponse
+	assert.Equal(t, "line one\nline two\nline three", resp.Response["output"])
 }
 
 func TestConvertMessages_ThinkingNoSignature(t *testing.T) {
@@ -152,7 +206,8 @@ func TestConvertMessages_ThinkingNoSignature(t *testing.T) {
 			pipe.TextBlock{Text: "Answer"},
 		}},
 	}
-	got := gemini.ConvertMessages(msgs)
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Parts, 2)
 	assert.True(t, got[0].Parts[0].Thought)
