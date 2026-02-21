@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
+	"github.com/fwojciec/pipe/bubbletea/textarea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,6 +165,19 @@ func TestModel_Update(t *testing.T) {
 
 		assert.False(t, model.Running())
 		assert.NoError(t, model.Err())
+	})
+
+	t.Run("InputHeightMsg adjusts viewport height", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		// Initial viewport height: 24 - 1(input) - 1(status) - 2(borders) = 20
+		assert.Equal(t, 20, m.Viewport.Height)
+
+		// Simulate input growing to 3 lines.
+		m = updateModel(t, m, textarea.InputHeightMsg{Height: 3})
+		// Viewport should shrink: 24 - 3(input) - 1(status) - 2(borders) = 18
+		assert.Equal(t, 18, m.Viewport.Height)
 	})
 
 	t.Run("enter during agent run is ignored", func(t *testing.T) {

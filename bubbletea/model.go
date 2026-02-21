@@ -7,18 +7,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fwojciec/pipe"
+	"github.com/fwojciec/pipe/bubbletea/textarea"
 )
 
 var _ tea.Model = Model{}
 
 // Model is the Bubble Tea model for the pipe TUI.
 type Model struct {
-	// Input is the text input component. Exported for test access.
-	Input textinput.Model
+	// Input is the multi-line text input component. Exported for test access.
+	Input textarea.Model
 	// Viewport is the scrollable output area. Exported for test access.
 	Viewport viewport.Model
 
@@ -43,6 +44,8 @@ type Model struct {
 	// always emit tool use blocks last within an assistant message.
 	hadToolCalls bool
 
+	windowHeight int // stored for viewport recomputation on InputHeightMsg
+
 	running bool
 	cancel  context.CancelFunc
 	eventCh chan pipe.Event
@@ -53,14 +56,16 @@ type Model struct {
 
 // New creates a new TUI Model with the given agent function, session, and theme.
 func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
-	ti := textinput.New()
-	ti.Placeholder = "Type a message..."
-	ti.Prompt = ""
-	ti.Focus()
-	ti.CharLimit = 0
+	ta := textarea.New()
+	ta.MaxHeight = 3
+	// Always return true so Enter never inserts newlines in the textarea.
+	// The root model's handleKey intercepts Enter for submission with its
+	// own empty-input guard. Ctrl+J inserts newlines.
+	ta.CheckInputComplete = func(_ string) bool { return true }
+	ta.Focus()
 
 	return Model{
-		Input:          ti,
+		Input:          ta,
 		run:            run,
 		session:        session,
 		theme:          theme,
@@ -94,7 +99,7 @@ func SetRunningWithCancel(m Model, cancel func()) (Model, tea.Cmd) {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	return cursor.Blink
 }
 
 // Update implements tea.Model.
@@ -104,6 +109,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m = m.handleWindowSize(msg)
+		return m, nil
+
+	case textarea.InputHeightMsg:
+		if m.windowHeight == 0 {
+			return m, nil
+		}
+		m.Viewport.Height = m.viewportHeight(msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -169,14 +181,8 @@ func (m Model) View() string {
 }
 
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
-	inputH := 1
-	statusHeight := 1
-	borderHeight := 2 // newlines between sections
-	vpHeight := msg.Height - inputH - statusHeight - borderHeight
-
-	if vpHeight < 1 {
-		vpHeight = 1
-	}
+	m.windowHeight = msg.Height
+	vpHeight := m.viewportHeight(m.Input.Height())
 
 	if !m.ready {
 		m.Viewport = viewport.New(msg.Width, vpHeight)
@@ -189,8 +195,19 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 		m.Viewport.Height = vpHeight
 	}
 
-	m.Input.Width = msg.Width
+	m.Input.SetWidth(msg.Width)
 	return m
+}
+
+// viewportHeight computes the viewport height given the current input height.
+func (m Model) viewportHeight(inputH int) int {
+	const statusHeight = 1
+	const borderHeight = 2 // newlines between sections
+	h := m.windowHeight - inputH - statusHeight - borderHeight
+	if h < 1 {
+		h = 1
+	}
+	return h
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
