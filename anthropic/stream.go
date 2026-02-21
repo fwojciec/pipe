@@ -278,12 +278,12 @@ func (s *stream) handleContentBlockDelta(data string) (pipe.Event, error) {
 		}
 		return pipe.EventThinkingDelta{Index: evt.Index, Delta: evt.Delta.Thinking}, nil
 	case "signature_delta":
+		// Internal use only; not exposed as a semantic event.
 		bs.signatureBuf.WriteString(evt.Delta.Signature)
 		s.msg.Content[evt.Index] = pipe.ThinkingBlock{
 			Thinking:  bs.thinkingBuf.String(),
 			Signature: bs.signature(),
 		}
-		// Internal use only; not exposed as a semantic event.
 		return nil, nil
 	default:
 		return nil, nil

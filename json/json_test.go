@@ -609,6 +609,30 @@ func TestMarshalSession_ThinkingBlockNilSignatureOmitted(t *testing.T) {
 	assert.NotContains(t, content[0], "signature")
 }
 
+func TestUnmarshalSession_InvalidBase64Signature(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{
+		"version": 1,
+		"id": "bad-sig",
+		"created_at": "2026-02-18T12:00:00Z",
+		"updated_at": "2026-02-18T12:00:00Z",
+		"messages": [
+			{
+				"type": "assistant",
+				"content": [{"type": "thinking", "thinking": "hmm", "signature": "!!!not-base64!!!"}],
+				"stop_reason": "end_turn",
+				"raw_stop_reason": "end_turn",
+				"usage": {"input_tokens": 10, "output_tokens": 5},
+				"timestamp": "2026-02-18T12:00:00Z"
+			}
+		]
+	}`)
+
+	_, err := pipejson.UnmarshalSession(data)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode thinking signature")
+}
+
 func TestMarshalSession_ToolCallComplexArguments(t *testing.T) {
 	t.Parallel()
 	complexArgs := json.RawMessage(`{"nested":{"key":"value"},"array":[1,2,3],"bool":true}`)
