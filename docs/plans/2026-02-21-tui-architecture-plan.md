@@ -417,6 +417,7 @@ git commit -m "Add ErrorBlock"
 package bubbletea_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -973,6 +974,7 @@ git commit -m "Add custom goldmark ANSI markdown renderer"
 package bubbletea_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -1014,12 +1016,45 @@ func TestAssistantTextBlock_View(t *testing.T) {
 		view := block.View(30)
 		assert.Contains(t, view, "easily")
 	})
+
+	t.Run("finalized paragraph stays while trailing text streams", func(t *testing.T) {
+		t.Parallel()
+		theme := pipe.DefaultTheme()
+		styles := bt.NewStyles(theme)
+		block := bt.NewAssistantTextBlock(theme, styles)
+		block.Append("first paragraph\n\n")
+		block.Append("trailing")
+		view := block.View(80)
+		assert.Contains(t, view, "first paragraph")
+		assert.Contains(t, view, "trailing")
+	})
+
+	t.Run("width change re-renders cached finalized content", func(t *testing.T) {
+		t.Parallel()
+		theme := pipe.DefaultTheme()
+		styles := bt.NewStyles(theme)
+		block := bt.NewAssistantTextBlock(theme, styles)
+		block.Append("word1 word2 word3 word4 word5 word6\n\ntail")
+		narrow := block.View(20)
+		wide := block.View(80)
+		assert.NotEqual(t, strings.Count(narrow, "\n"), strings.Count(wide, "\n"))
+	})
+
+	t.Run("unclosed fenced code block renders safely", func(t *testing.T) {
+		t.Parallel()
+		theme := pipe.DefaultTheme()
+		styles := bt.NewStyles(theme)
+		block := bt.NewAssistantTextBlock(theme, styles)
+		block.Append("```go\nfmt.Println(\"x\")")
+		view := block.View(80)
+		assert.Contains(t, view, "fmt.Println")
+	})
 }
 ```
 
 **Step 2: Run test to verify it fails**
 
-**Step 3: Write minimal implementation**
+**Step 3: Implement AssistantTextBlock with streaming optimization**
 
 ```go
 package bubbletea
@@ -1038,14 +1073,24 @@ type AssistantTextBlock struct {
 	content strings.Builder
 	theme   pipe.Theme
 	styles  Styles
+
+	// finalizedRaw is the stable prefix ending at the last double newline.
+	// It's rendered once per width and cached in finalizedByWidth.
+	finalizedRaw     string
+	finalizedByWidth map[int]string
 }
 
 func NewAssistantTextBlock(theme pipe.Theme, styles Styles) *AssistantTextBlock {
-	return &AssistantTextBlock{theme: theme, styles: styles}
+	return &AssistantTextBlock{
+		theme:           theme,
+		styles:          styles,
+		finalizedByWidth: make(map[int]string),
+	}
 }
 
 func (b *AssistantTextBlock) Append(text string) {
 	b.content.WriteString(text)
+	b.promoteFinalized()
 }
 
 func (b *AssistantTextBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
@@ -1053,12 +1098,68 @@ func (b *AssistantTextBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 }
 
 func (b *AssistantTextBlock) View(width int) string {
-	return markdown.Render(b.content.String(), width, b.theme)
+	finalizedRendered := b.renderFinalized(width)
+	trailing := b.trailingRaw()
+	if hasUnclosedFence(trailing) {
+		// Close fence only for rendering so partial streams display safely.
+		trailing += "\n```"
+	}
+	trailingRendered := markdown.Render(trailing, width, b.theme)
+	switch {
+	case finalizedRendered == "":
+		return trailingRendered
+	case trailingRendered == "":
+		return finalizedRendered
+	default:
+		return finalizedRendered + "\n\n" + trailingRendered
+	}
+}
+
+func (b *AssistantTextBlock) promoteFinalized() {
+	raw := b.content.String()
+	idx := strings.LastIndex(raw, "\n\n")
+	if idx <= 0 {
+		return
+	}
+	next := raw[:idx]
+	if next != b.finalizedRaw {
+		b.finalizedRaw = next
+		// Width-sensitive cache must be invalidated when finalized text grows.
+		clear(b.finalizedByWidth)
+	}
+}
+
+func (b *AssistantTextBlock) renderFinalized(width int) string {
+	if width <= 0 || b.finalizedRaw == "" {
+		return ""
+	}
+	if cached, ok := b.finalizedByWidth[width]; ok {
+		return cached
+	}
+	rendered := markdown.Render(b.finalizedRaw, width, b.theme)
+	b.finalizedByWidth[width] = rendered
+	return rendered
+}
+
+func (b *AssistantTextBlock) trailingRaw() string {
+	raw := b.content.String()
+	if b.finalizedRaw == "" {
+		return raw
+	}
+	prefix := b.finalizedRaw + "\n\n"
+	return strings.TrimPrefix(raw, prefix)
+}
+
+func hasUnclosedFence(s string) bool {
+	return strings.Count(s, "```")%2 == 1
 }
 ```
 
-McGugan's block-finalization optimization deferred to follow-up. Full re-render
-is fine for conversations under ~50KB.
+McGugan-style block finalization is included in scope for this task:
+- finalized paragraphs (up to the last `\n\n`) are cached
+- only trailing unfinalized text is re-rendered per delta
+- cache is width-aware (`map[width]rendered`) to avoid stale wraps on resize
+- trailing unclosed fences are auto-closed for rendering safety
 
 **Step 4: Run test, then `make validate`**
 
@@ -1066,7 +1167,7 @@ is fine for conversations under ~50KB.
 
 ```bash
 git add bubbletea/block_assistant.go bubbletea/block_assistant_test.go
-git commit -m "Add AssistantTextBlock with markdown rendering"
+git commit -m "Add AssistantTextBlock with markdown rendering and streaming cache"
 ```
 
 ---
