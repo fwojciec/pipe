@@ -1,6 +1,7 @@
 package textarea_test
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -131,6 +132,19 @@ func TestCtrlJInsertsNewline(t *testing.T) {
 		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
 		ta = typeString(t, ta, "world")
 		assert.Equal(t, "hello\nworld", ta.Value())
+	})
+
+	t.Run("maxLines hard limit prevents newline insertion", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		// MaxHeight=0 disables the soft limit; only the hard maxLines=10000 applies.
+		ta.MaxHeight = 0
+		// Fill to exactly maxLines (10000) lines.
+		ta.SetValue(strings.Repeat("x\n", 9999) + "x")
+		require.Equal(t, 10000, ta.LineCount())
+		// Ctrl+J should not insert another newline.
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+		assert.Equal(t, 10000, ta.LineCount())
 	})
 }
 

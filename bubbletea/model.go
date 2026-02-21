@@ -288,10 +288,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	m.Viewport.GotoBottom()
 
 	// Reset active maps for new conversation turn.
-	m.activeText = make(map[int]*AssistantTextBlock)
-	m.activeThinking = make(map[int]*ThinkingBlock)
-	m.activeToolCall = make(map[string]*ToolCallBlock)
-	m.hadToolCalls = false
+	m = m.resetTurnState()
 
 	// Set up channels and context for agent run.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -362,15 +359,22 @@ func (m Model) renderContent() string {
 	return b.String()
 }
 
+// resetTurnState clears the active block maps and hadToolCalls flag, preparing
+// the model for a new assistant turn.
+func (m Model) resetTurnState() Model {
+	m.activeText = make(map[int]*AssistantTextBlock)
+	m.activeThinking = make(map[int]*ThinkingBlock)
+	m.activeToolCall = make(map[string]*ToolCallBlock)
+	m.hadToolCalls = false
+	return m
+}
+
 // processEvent routes a streaming event to the appropriate block.
 func (m Model) processEvent(evt pipe.Event) Model {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
 		if m.hadToolCalls {
-			m.activeText = make(map[int]*AssistantTextBlock)
-			m.activeThinking = make(map[int]*ThinkingBlock)
-			m.activeToolCall = make(map[string]*ToolCallBlock)
-			m.hadToolCalls = false
+			m = m.resetTurnState()
 		}
 		if b, ok := m.activeText[e.Index]; ok {
 			b.Append(e.Delta)
@@ -383,10 +387,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		}
 	case pipe.EventThinkingDelta:
 		if m.hadToolCalls {
-			m.activeText = make(map[int]*AssistantTextBlock)
-			m.activeThinking = make(map[int]*ThinkingBlock)
-			m.activeToolCall = make(map[string]*ToolCallBlock)
-			m.hadToolCalls = false
+			m = m.resetTurnState()
 		}
 		if b, ok := m.activeThinking[e.Index]; ok {
 			b.Append(e.Delta)

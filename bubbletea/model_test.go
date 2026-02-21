@@ -373,6 +373,24 @@ func TestModel_MultiTurnReset(t *testing.T) {
 		assert.Contains(t, view, "turn1")
 		assert.Contains(t, view, "turn2")
 	})
+
+	t.Run("tool calls after turn reset create fresh blocks", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Turn 1: tool call.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-1", Delta: `{"path":"/old"}`}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		// Turn 2: text delta triggers turn state reset, clearing activeToolCall.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "answer"}})
+		// New tool call with a different ID — must create a fresh block.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-2", Delta: `{"cmd":"ls"}`}})
+		view := m.View()
+		assert.Contains(t, view, "read")
+		assert.Contains(t, view, "bash")
+		assert.Contains(t, view, "answer")
+	})
 }
 
 func TestModel_Integration(t *testing.T) {
