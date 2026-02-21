@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/markdown"
+	"github.com/fwojciec/pipe/goldmark"
 )
 
 var _ MessageBlock = (*AssistantTextBlock)(nil)
@@ -24,7 +24,7 @@ type AssistantTextBlock struct {
 }
 
 // NewAssistantTextBlock creates a new block for streaming assistant text.
-func NewAssistantTextBlock(theme pipe.Theme, styles Styles) *AssistantTextBlock {
+func NewAssistantTextBlock(theme pipe.Theme) *AssistantTextBlock {
 	return &AssistantTextBlock{
 		theme:            theme,
 		finalizedByWidth: make(map[int]string),
@@ -54,7 +54,7 @@ func (b *AssistantTextBlock) View(width int) string {
 	if trailing == "" {
 		return finalizedRendered
 	}
-	trailingRendered := markdown.Render(trailing, width, b.theme)
+	trailingRendered := goldmark.Render(trailing, width, b.theme)
 	// Whitespace-only trailing input (e.g. " ") may render to whitespace;
 	// treat it the same as empty to avoid spurious blank lines.
 	if strings.TrimSpace(trailingRendered) == "" {
@@ -105,7 +105,7 @@ func (b *AssistantTextBlock) renderFinalized(width int) string {
 	if cached, ok := b.finalizedByWidth[width]; ok {
 		return cached
 	}
-	rendered := markdown.Render(b.finalizedRaw, width, b.theme)
+	rendered := goldmark.Render(b.finalizedRaw, width, b.theme)
 	b.finalizedByWidth[width] = rendered
 	return rendered
 }

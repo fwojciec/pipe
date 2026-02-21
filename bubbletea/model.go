@@ -58,9 +58,10 @@ type Model struct {
 func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
 	ta := textarea.New()
 	ta.MaxHeight = 3
-	// Always return true so Enter never inserts newlines in the textarea.
-	// The root model's handleKey intercepts Enter for submission with its
-	// own empty-input guard. Ctrl+J inserts newlines.
+	// Defensive fallback: handleKey intercepts Enter at line 225 before the
+	// textarea sees it, so this callback is normally never invoked. It exists
+	// as a safety net — if a code path ever lets Enter through, this prevents
+	// accidental newline insertion. Ctrl+J inserts newlines.
 	ta.CheckInputComplete = func(_ string) bool { return true }
 	ta.Focus()
 
@@ -233,7 +234,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.submitInput(text)
 
 	case tea.KeyTab:
-		if !m.running && m.blockFocus >= 0 {
+		if !m.running && m.blockFocus >= 0 && m.blockFocus < len(m.blocks) {
 			block, cmd := m.blocks[m.blockFocus].Update(ToggleMsg{})
 			m.blocks[m.blockFocus] = block
 			m.Viewport.SetContent(m.renderContent())
@@ -321,7 +322,7 @@ func (m Model) renderSession() Model {
 			for _, b := range msg.Content {
 				switch cb := b.(type) {
 				case pipe.TextBlock:
-					block := NewAssistantTextBlock(m.theme, m.styles)
+					block := NewAssistantTextBlock(m.theme)
 					block.Append(cb.Text)
 					m.blocks = append(m.blocks, block)
 				case pipe.ThinkingBlock:
@@ -368,12 +369,13 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		if m.hadToolCalls {
 			m.activeText = make(map[int]*AssistantTextBlock)
 			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.activeToolCall = make(map[string]*ToolCallBlock)
 			m.hadToolCalls = false
 		}
 		if b, ok := m.activeText[e.Index]; ok {
 			b.Append(e.Delta)
 		} else {
-			b := NewAssistantTextBlock(m.theme, m.styles)
+			b := NewAssistantTextBlock(m.theme)
 			b.Append(e.Delta)
 			m.blocks = append(m.blocks, b)
 			m.activeText[e.Index] = b
@@ -383,6 +385,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		if m.hadToolCalls {
 			m.activeText = make(map[int]*AssistantTextBlock)
 			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.activeToolCall = make(map[string]*ToolCallBlock)
 			m.hadToolCalls = false
 		}
 		if b, ok := m.activeThinking[e.Index]; ok {

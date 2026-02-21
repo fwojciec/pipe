@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
-	"github.com/fwojciec/pipe/markdown"
+	"github.com/fwojciec/pipe/goldmark"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -17,8 +17,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("renders markdown", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("hello **world**")
 		view := block.View(80)
 		assert.Contains(t, view, "hello")
@@ -28,8 +27,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("append accumulates deltas", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("hello ")
 		block.Append("world")
 		view := block.View(80)
@@ -39,8 +37,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("wraps paragraphs to width", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("short words that keep going and going beyond thirty columns easily")
 		view := block.View(30)
 		assert.Contains(t, view, "easily")
@@ -49,8 +46,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("finalized paragraph stays while trailing text streams", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("first paragraph\n\n")
 		block.Append("trailing")
 		view := block.View(80)
@@ -61,8 +57,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("width change re-renders cached finalized content", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("word1 word2 word3 word4 word5 word6\n\ntail")
 		narrow := block.View(20)
 		wide := block.View(80)
@@ -72,8 +67,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("content ending at paragraph boundary has no spurious whitespace", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("complete paragraph\n\n")
 		view := block.View(80)
 		// The finalized content should render cleanly with no extra blank
@@ -86,15 +80,14 @@ func TestAssistantTextBlock_View(t *testing.T) {
 		// newlines which are not semantically significant.
 		trimmed := strings.TrimRight(view, "\n")
 		assert.Equal(t, trimmed, strings.TrimRight(
-			markdown.Render("complete paragraph", 80, theme), "\n",
+			goldmark.Render("complete paragraph", 80, theme), "\n",
 		))
 	})
 
 	t.Run("unclosed fenced code block renders safely", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("```go\nfmt.Println(\"x\")")
 		view := block.View(80)
 		assert.Contains(t, view, "fmt.Println")
@@ -103,8 +96,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("blank line inside code fence does not split finalization", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("text\n\n```go\nfunc() {\n\ncode")
 		view := block.View(80)
 		// The code block content should render as code, not prose.
@@ -115,8 +107,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("update returns self with no command", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("hello")
 		updated, cmd := block.Update(tea.KeyMsg{})
 		assert.Equal(t, block, updated)
@@ -126,8 +117,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("empty content renders empty string", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		view := block.View(80)
 		assert.Empty(t, view)
 	})
@@ -135,8 +125,7 @@ func TestAssistantTextBlock_View(t *testing.T) {
 	t.Run("zero width renders gracefully", func(t *testing.T) {
 		t.Parallel()
 		theme := pipe.DefaultTheme()
-		styles := bt.NewStyles(theme)
-		block := bt.NewAssistantTextBlock(theme, styles)
+		block := bt.NewAssistantTextBlock(theme)
 		block.Append("hello world")
 		view := block.View(0)
 		assert.NotPanics(t, func() { block.View(0) })

@@ -184,6 +184,113 @@ func TestSetWidthInvalidatesCache(t *testing.T) {
 	require.NotEqual(t, view80, view20)
 }
 
+func TestCursorMovement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("left and right arrow keys", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "abc")
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		ta = typeString(t, ta, "X")
+		assert.Equal(t, "aXbc", ta.Value())
+	})
+
+	t.Run("up and down across lines", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta.MaxHeight = 10
+		ta.SetValue("first\nsecond\nthird")
+		// Cursor is at end of "third" after SetValue. Move up.
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyUp})
+		// Move to end of line, then type.
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyEnd})
+		ta = typeString(t, ta, "!")
+		assert.Contains(t, ta.Value(), "second!")
+	})
+
+	t.Run("word forward and backward", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "hello world foo")
+		// Move to start.
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyHome})
+		// Word forward.
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyRight, Runes: []rune{'f'}, Alt: true})
+		ta = typeString(t, ta, "X")
+		assert.Contains(t, ta.Value(), "helloX")
+	})
+}
+
+func TestDeleteOperations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delete forward character", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "hello")
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyHome})
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyDelete})
+		assert.Equal(t, "ello", ta.Value())
+	})
+
+	t.Run("delete word backward", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "hello world")
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+		assert.Equal(t, "hello ", ta.Value())
+	})
+
+	t.Run("delete to end of line", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "hello world")
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyHome})
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyRight})
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+		assert.Equal(t, "h", ta.Value())
+	})
+
+	t.Run("delete to start of line", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta = typeString(t, ta, "hello world")
+		ta, _ = ta.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		assert.Equal(t, "", ta.Value())
+	})
+}
+
+func TestCharLimit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enforces character limit", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta.CharLimit = 5
+		ta = typeString(t, ta, "abcdefgh")
+		assert.Equal(t, "abcde", ta.Value())
+	})
+
+	t.Run("zero means no limit", func(t *testing.T) {
+		t.Parallel()
+		ta := newFocused(t)
+		ta.CharLimit = 0
+		ta = typeString(t, ta, "abcdefgh")
+		assert.Equal(t, "abcdefgh", ta.Value())
+	})
+}
+
+func TestReset(t *testing.T) {
+	t.Parallel()
+	ta := newFocused(t)
+	ta = typeString(t, ta, "hello")
+	ta.Reset()
+	assert.Equal(t, "", ta.Value())
+	assert.Equal(t, 1, ta.LineCount())
+}
+
 func TestFocusAndBlur(t *testing.T) {
 	t.Parallel()
 

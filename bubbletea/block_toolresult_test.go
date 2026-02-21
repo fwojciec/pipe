@@ -36,6 +36,19 @@ func TestToolResultBlock_View(t *testing.T) {
 		assert.Contains(t, view, "command failed")
 	})
 
+	t.Run("empty content renders header only", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolResultBlock("read", "", false, styles)
+		view := block.View(80)
+		assert.Contains(t, view, "read")
+		// Should not contain a trailing newline-separated empty styled span.
+		lines := strings.Split(strings.TrimRight(view, " "), "\n")
+		for _, line := range lines[1:] {
+			assert.Empty(t, strings.TrimSpace(line))
+		}
+	})
+
 	t.Run("long result wraps to width", func(t *testing.T) {
 		t.Parallel()
 		styles := bt.NewStyles(pipe.DefaultTheme())

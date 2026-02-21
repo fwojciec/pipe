@@ -492,7 +492,14 @@ func TestModel_Teatest(t *testing.T) {
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
-		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+
+		fm := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
+		final, ok := fm.(bt.Model)
+		require.True(t, ok)
+		assert.False(t, final.Running())
+		assert.NoError(t, final.Err())
+		// Session should contain user message + assistant message.
+		assert.Len(t, session.Messages, 2)
 	})
 
 	t.Run("existing session messages render on init", func(t *testing.T) {

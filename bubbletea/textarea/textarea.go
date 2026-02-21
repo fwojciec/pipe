@@ -177,11 +177,12 @@ func (m *Model) InsertRune(r rune) {
 	m.insertRunesFromUserInput([]rune{r})
 }
 
-// Length returns the number of characters in the textarea.
+// Length returns the number of runes in the textarea, including newlines
+// between rows. This matches the rune-count semantics used by CharLimit.
 func (m Model) Length() int {
 	var l int
 	for _, row := range m.value {
-		l += uniseg.StringWidth(string(row))
+		l += len(row)
 	}
 	return l + len(m.value) - 1
 }
@@ -433,7 +434,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.deleteWordRight()
 		case key.Matches(msg, m.KeyMap.InsertNewline):
 			// Ctrl+J: always insert newline.
-			if m.MaxHeight > 0 && len(m.value) >= m.MaxHeight {
+			if (m.MaxHeight > 0 && len(m.value) >= m.MaxHeight) || len(m.value) >= maxLines {
 				break
 			}
 			m.col = clamp(m.col, 0, len(m.value[m.row]))

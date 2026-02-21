@@ -70,9 +70,14 @@ func TestToolCallBlock_View(t *testing.T) {
 		block.AppendArgs(`{"path":"x"}`)
 		// Starts collapsed.
 		assert.NotContains(t, block.View(80), "path")
+		// First toggle: expand.
 		updated, _ := block.Update(bt.ToggleMsg{})
 		block = updated.(*bt.ToolCallBlock)
 		assert.Contains(t, block.View(80), "path")
+		// Second toggle: collapse again.
+		updated, _ = block.Update(bt.ToggleMsg{})
+		block = updated.(*bt.ToolCallBlock)
+		assert.NotContains(t, block.View(80), "path")
 	})
 
 	t.Run("append accumulates argument text", func(t *testing.T) {

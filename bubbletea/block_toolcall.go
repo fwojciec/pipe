@@ -57,6 +57,6 @@ func (b *ToolCallBlock) View(width int) string {
 	if b.collapsed || b.args.Len() == 0 {
 		return lipgloss.NewStyle().Width(width).Render(header)
 	}
-	full := header + "\n" + b.args.String()
+	full := header + "\n" + b.styles.Muted.Render(b.args.String())
 	return lipgloss.NewStyle().Width(width).Render(full)
 }

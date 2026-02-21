@@ -25,11 +25,14 @@ func (b *ToolResultBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 }
 
 func (b *ToolResultBlock) View(width int) string {
+	header := b.styles.ToolCall.Render(b.toolName)
+	if b.content == "" {
+		return lipgloss.NewStyle().Width(width).Render(header)
+	}
 	contentStyle := b.styles.Muted
 	if b.isError {
 		contentStyle = b.styles.Error
 	}
-	header := b.styles.ToolCall.Render(b.toolName)
 	rendered := contentStyle.Render(b.content)
 	full := header + "\n" + rendered
 	return lipgloss.NewStyle().Width(width).Render(full)

@@ -1,4 +1,4 @@
-package markdown
+package goldmark
 
 import (
 	"bytes"
@@ -70,7 +70,8 @@ func (r *ansiRenderer) renderBlock(node ast.Node, source []byte, width int, buf 
 	case *ast.Heading:
 		inline := r.collectInline(n, source)
 		styled := r.accent.Render(inline)
-		buf.WriteString(styled)
+		wrapped := lipgloss.NewStyle().Width(width).Render(styled)
+		buf.WriteString(wrapped)
 		buf.WriteString("\n")
 		if n.NextSibling() != nil {
 			buf.WriteString("\n")
@@ -243,6 +244,13 @@ func (r *ansiRenderer) renderInline(node ast.Node, source []byte, buf *bytes.Buf
 	case *ast.AutoLink:
 		url := string(n.URL(source))
 		buf.WriteString(r.underline.Render(url))
+
+	case *ast.Image:
+		alt := r.collectInline(n, source)
+		url := string(n.Destination)
+		buf.WriteString(r.underline.Render(alt))
+		buf.WriteString(" ")
+		buf.WriteString(r.muted.Render("(" + url + ")"))
 
 	case *ast.RawHTML:
 		for i := 0; i < n.Segments.Len(); i++ {

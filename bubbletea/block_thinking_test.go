@@ -42,10 +42,14 @@ func TestThinkingBlock_View(t *testing.T) {
 		block.Append("thoughts")
 		// Starts collapsed.
 		assert.NotContains(t, block.View(80), "thoughts")
-		// ToggleMsg expands it.
+		// First toggle: expand.
 		updated, _ := block.Update(bt.ToggleMsg{})
 		block = updated.(*bt.ThinkingBlock)
 		assert.Contains(t, block.View(80), "thoughts")
+		// Second toggle: collapse again.
+		updated, _ = block.Update(bt.ToggleMsg{})
+		block = updated.(*bt.ThinkingBlock)
+		assert.NotContains(t, block.View(80), "thoughts")
 	})
 
 	t.Run("expanded with empty content", func(t *testing.T) {

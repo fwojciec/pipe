@@ -4,7 +4,6 @@ import (
 	"strings"
 	"unicode"
 
-	rw "github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
 )
 
@@ -76,8 +75,7 @@ func wrap(runes []rune, width int) [][]rune {
 				word = nil
 			}
 		} else if len(word) > 0 {
-			lastCharLen := rw.RuneWidth(word[len(word)-1])
-			if uniseg.StringWidth(string(word))+lastCharLen > width {
+			if uniseg.StringWidth(string(word)) > width {
 				if len(lines[row]) > 0 {
 					row++
 					lines = append(lines, []rune{})
@@ -91,12 +89,14 @@ func wrap(runes []rune, width int) [][]rune {
 	if uniseg.StringWidth(string(lines[row]))+uniseg.StringWidth(string(word))+spaces >= width {
 		lines = append(lines, []rune{})
 		lines[row+1] = append(lines[row+1], word...)
-		spaces++
-		lines[row+1] = append(lines[row+1], repeatSpaces(spaces)...)
+		if spaces > 0 {
+			lines[row+1] = append(lines[row+1], repeatSpaces(spaces)...)
+		}
 	} else {
 		lines[row] = append(lines[row], word...)
-		spaces++
-		lines[row] = append(lines[row], repeatSpaces(spaces)...)
+		if spaces > 0 {
+			lines[row] = append(lines[row], repeatSpaces(spaces)...)
+		}
 	}
 
 	return lines
