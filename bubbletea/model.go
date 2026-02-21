@@ -395,6 +395,8 @@ func (m Model) processEvent(evt pipe.Event) Model {
 }
 
 // updateBlockFocus scans backwards to find the last collapsible block.
+// Only the focused block responds to Tab. ShiftTab cycles to the previous
+// collapsible block. Full arrow-key navigation is deferred to a follow-up.
 func (m Model) updateBlockFocus() Model {
 	m.blockFocus = -1
 	for i := len(m.blocks) - 1; i >= 0; i-- {
