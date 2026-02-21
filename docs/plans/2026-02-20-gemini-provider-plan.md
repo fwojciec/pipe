@@ -6,7 +6,15 @@
 
 **Architecture:** SDK-wrapped provider in `gemini/` using `google.golang.org/genai`. Domain type `ThinkingBlock` gains `Signature []byte`. Anthropic provider updated to capture/replay signatures. Provider selection via `-provider` flag with env var auto-detect.
 
-**Tech Stack:** Go 1.24, `google.golang.org/genai` SDK, `testify` for assertions.
+**Tech Stack:** Go 1.24, `google.golang.org/genai` v1.47.0 SDK, `testify` for assertions.
+
+**Key SDK type facts** (verified against `google.golang.org/genai@v1.47.0/types.go`):
+- `Part.ThoughtSignature` is `[]byte`, not `string`
+- `FunctionCall.ID` exists (`string`) — prefer SDK ID when present, generate client-side as fallback
+- `FunctionResponse.ID` exists (`string`) — pass `ToolCallID` through for correlation
+- `FunctionResponse.Response` should use `"output"` key for output and `"error"` key for errors
+
+**Cross-provider note:** Thinking signatures are provider-specific opaque blobs. Sessions are bound to a provider. Each provider replays signatures it stored; switching providers mid-session will produce invalid signatures (acceptable edge case).
 
 ---
 
@@ -375,17 +383,15 @@ In `handleContentBlockStop`, add a case for `thinking` to finalize the signature
 	}
 ```
 
-**Step 4: Run tests to verify they pass**
+**Step 4: Update existing TestStream_Thinking**
 
-Run: `go test ./anthropic/... -count=1`
-Expected: PASS (including existing `TestStream_Thinking` which has a signature_delta event — that test currently passes because it only checks `msg.Content[0]` for the thinking text; now it will set signature but the test doesn't assert it's nil so it still passes)
-
-**Important**: Check the existing `TestStream_Thinking` test at line 108. It asserts:
+The existing `TestStream_Thinking` at `anthropic/stream_test.go:108` asserts:
 ```go
 assert.Equal(t, pipe.ThinkingBlock{Thinking: "Let me think... step 2"}, msg.Content[0])
 ```
 
-This test has a `signature_delta` event (`"sig123"`), so now `msg.Content[0]` will be `pipe.ThinkingBlock{Thinking: "Let me think... step 2", Signature: []byte("sig123")}`. **This will break.** Update it:
+This test has a `signature_delta` event (`"sig123"`), so now `msg.Content[0]` will be
+`ThinkingBlock{..., Signature: []byte("sig123")}`. **This WILL break.** Update it:
 
 ```go
 assert.Equal(t, pipe.ThinkingBlock{Thinking: "Let me think... step 2", Signature: []byte("sig123")}, msg.Content[0])
@@ -633,7 +639,7 @@ func TestConvertMessages_ThinkingWithSignature(t *testing.T) {
 	require.Len(t, got[0].Parts, 2)
 	assert.Equal(t, "reasoning", got[0].Parts[0].Text)
 	assert.True(t, got[0].Parts[0].Thought)
-	assert.Equal(t, "thought-sig-data", got[0].Parts[0].ThoughtSignature)
+	assert.Equal(t, []byte("thought-sig-data"), got[0].Parts[0].ThoughtSignature) // ThoughtSignature is []byte
 	assert.Equal(t, "Answer", got[0].Parts[1].Text)
 }
 
@@ -652,18 +658,44 @@ func TestConvertMessages_ToolCallAndResult(t *testing.T) {
 	got := gemini.ConvertMessages(msgs)
 	require.Len(t, got, 2)
 
-	// Assistant with tool call
+	// Assistant with tool call — ID passed through
 	assert.Equal(t, "model", got[0].Role)
 	require.Len(t, got[0].Parts, 1)
 	require.NotNil(t, got[0].Parts[0].FunctionCall)
+	assert.Equal(t, "call_123", got[0].Parts[0].FunctionCall.ID)
 	assert.Equal(t, "read", got[0].Parts[0].FunctionCall.Name)
 	assert.Equal(t, "foo.go", got[0].Parts[0].FunctionCall.Args["path"])
 
-	// Tool result
+	// Tool result — ID correlates, output in "output" key
 	assert.Equal(t, "user", got[1].Role)
 	require.Len(t, got[1].Parts, 1)
 	require.NotNil(t, got[1].Parts[0].FunctionResponse)
+	assert.Equal(t, "call_123", got[1].Parts[0].FunctionResponse.ID)
 	assert.Equal(t, "read", got[1].Parts[0].FunctionResponse.Name)
+	assert.Equal(t, "file contents", got[1].Parts[0].FunctionResponse.Response["output"])
+}
+
+func TestConvertMessages_ToolResultError(t *testing.T) {
+	t.Parallel()
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "call_err", Name: "bash", Arguments: json.RawMessage(`{"cmd":"rm -rf /"}`)},
+		}},
+		pipe.ToolResultMessage{
+			ToolCallID: "call_err",
+			ToolName:   "bash",
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "permission denied"}},
+			IsError:    true,
+		},
+	}
+	got := gemini.ConvertMessages(msgs)
+	require.Len(t, got, 2)
+
+	// Error result — uses "error" key
+	resp := got[1].Parts[0].FunctionResponse
+	assert.Equal(t, "call_err", resp.ID)
+	assert.Equal(t, "permission denied", resp.Response["error"])
+	assert.Nil(t, resp.Response["output"])
 }
 
 func TestConvertMessages_ImageBlock(t *testing.T) {
@@ -828,16 +860,20 @@ func ConvertMessages(msgs []pipe.Message) []*genai.Content {
 				Parts: convertParts(m.Content),
 			})
 		case pipe.ToolResultMessage:
-			// Build function response.
-			var responseMap map[string]any
+			// Build function response per SDK convention:
+			// Use "output" key for success, "error" key for errors.
 			text := extractText(m.Content)
-			if err := json.Unmarshal([]byte(text), &responseMap); err != nil {
-				responseMap = map[string]any{"result": text}
+			var responseMap map[string]any
+			if m.IsError {
+				responseMap = map[string]any{"error": text}
+			} else if err := json.Unmarshal([]byte(text), &responseMap); err != nil {
+				responseMap = map[string]any{"output": text}
 			}
 			result = append(result, &genai.Content{
 				Role: "user",
 				Parts: []*genai.Part{{
 					FunctionResponse: &genai.FunctionResponse{
+						ID:       m.ToolCallID, // correlate with FunctionCall.ID
 						Name:     m.ToolName,
 						Response: responseMap,
 					},
@@ -857,7 +893,7 @@ func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
 		case pipe.ThinkingBlock:
 			p := &genai.Part{Text: bl.Thinking, Thought: true}
 			if bl.Signature != nil {
-				p.ThoughtSignature = string(bl.Signature)
+				p.ThoughtSignature = bl.Signature // both are []byte
 			}
 			parts = append(parts, p)
 		case pipe.ToolCallBlock:
@@ -865,6 +901,7 @@ func convertParts(blocks []pipe.ContentBlock) []*genai.Part {
 			_ = json.Unmarshal(bl.Arguments, &args)
 			parts = append(parts, &genai.Part{
 				FunctionCall: &genai.FunctionCall{
+					ID:   bl.ID, // pass through for correlation
 					Name: bl.Name,
 					Args: args,
 				},
@@ -1025,7 +1062,7 @@ func TestStream_ThinkingDelta(t *testing.T) {
 		{
 			Candidates: []*genai.Candidate{{
 				Content: &genai.Content{Parts: []*genai.Part{
-					{Text: "reasoning", Thought: true, ThoughtSignature: "sig123"},
+					{Text: "reasoning", Thought: true, ThoughtSignature: []byte("sig123")}, // ThoughtSignature is []byte
 				}},
 				FinishReason: genai.FinishReasonStop,
 			}},
@@ -1070,7 +1107,7 @@ func TestStream_ToolCallComplete(t *testing.T) {
 		{
 			Candidates: []*genai.Candidate{{
 				Content: &genai.Content{Parts: []*genai.Part{
-					{FunctionCall: &genai.FunctionCall{Name: "read", Args: map[string]any{"path": "foo.go"}}},
+					{FunctionCall: &genai.FunctionCall{ID: "sdk_id_1", Name: "read", Args: map[string]any{"path": "foo.go"}}},
 				}},
 				FinishReason: genai.FinishReasonStop,
 			}},
@@ -1088,15 +1125,80 @@ func TestStream_ToolCallComplete(t *testing.T) {
 	begin, ok := events[0].(pipe.EventToolCallBegin)
 	require.True(t, ok)
 	assert.Equal(t, "read", begin.Name)
-	assert.NotEmpty(t, begin.ID)
+	assert.Equal(t, "sdk_id_1", begin.ID) // prefer SDK ID when present
 
 	end, ok := events[1].(pipe.EventToolCallEnd)
 	require.True(t, ok)
 	assert.Equal(t, "read", end.Call.Name)
+	assert.Equal(t, "sdk_id_1", end.Call.ID)
 	assert.JSONEq(t, `{"path":"foo.go"}`, string(end.Call.Arguments))
 
 	msg, err := s.Message()
 	require.NoError(t, err)
+	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
+}
+
+func TestStream_ToolCallFallbackID(t *testing.T) {
+	t.Parallel()
+	// FunctionCall without ID — should generate client-side ID.
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{FunctionCall: &genai.FunctionCall{Name: "bash", Args: map[string]any{"cmd": "ls"}}},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 5,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks), nil)
+	events := collectStreamEvents(t, s)
+
+	begin := events[0].(pipe.EventToolCallBegin)
+	assert.NotEmpty(t, begin.ID)
+	assert.True(t, len(begin.ID) > 5, "generated ID should be non-trivial")
+}
+
+func TestStream_MultiPartChunk(t *testing.T) {
+	t.Parallel()
+	// Single chunk with thinking + text + tool call — tests append-based ordering.
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{Text: "reasoning", Thought: true, ThoughtSignature: []byte("sig")},
+					{Text: "I'll check."},
+					{FunctionCall: &genai.FunctionCall{ID: "tc_1", Name: "read", Args: map[string]any{"path": "a.go"}}},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 15,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks), nil)
+	events := collectStreamEvents(t, s)
+
+	require.Len(t, events, 4) // ThinkingDelta, TextDelta, ToolCallBegin, ToolCallEnd
+	assert.IsType(t, pipe.EventThinkingDelta{}, events[0])
+	assert.IsType(t, pipe.EventTextDelta{}, events[1])
+	assert.IsType(t, pipe.EventToolCallBegin{}, events[2])
+	assert.IsType(t, pipe.EventToolCallEnd{}, events[3])
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 3) // thinking[0], text[1], tool_call[2] — append order preserved
+	assert.IsType(t, pipe.ThinkingBlock{}, msg.Content[0])
+	assert.IsType(t, pipe.TextBlock{}, msg.Content[1])
+	assert.IsType(t, pipe.ToolCallBlock{}, msg.Content[2])
 	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
 }
 
@@ -1181,11 +1283,12 @@ package gemini
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
-	"sync"
 
 	"github.com/fwojciec/pipe"
 	"google.golang.org/genai"
@@ -1201,15 +1304,19 @@ type stream struct {
 	pending []pipe.Event
 	err     error
 
-	// Block tracking for accumulating content across chunks.
-	textBuf     string
-	thinkingBuf string
-	thinkingSig string
-	blockIndex  int // next content block index
+	// Block tracking uses per-block state keyed by content index.
+	// Each new part type from the SDK gets its own content block (append-based,
+	// not type-scanned). Consecutive same-type parts accumulate into the
+	// current block; a different type always starts a new block.
+	blocks      []*blockState
 	hasToolCall bool
+}
 
-	// pullOnce ensures we convert the iterator to pull exactly once.
-	pullOnce sync.Once
+// blockState tracks accumulation for a single content block.
+type blockState struct {
+	blockType string // "thinking", "text", "tool_call"
+	textBuf   string
+	signature []byte // for thinking blocks (ThoughtSignature is []byte)
 }
 
 // Interface compliance check.
@@ -1266,8 +1373,6 @@ func (s *stream) Next() (pipe.Event, error) {
 	}
 
 	s.state = pipe.StreamStateStreaming
-
-	// Process the chunk and buffer events.
 	s.processChunk(resp)
 
 	// Return first pending event.
@@ -1323,7 +1428,6 @@ func (s *stream) finalize() {
 }
 
 func (s *stream) processChunk(resp *genai.GenerateContentResponse) {
-	// Update usage from latest chunk.
 	if resp.UsageMetadata != nil {
 		cached := int(resp.UsageMetadata.CachedContentTokenCount)
 		input := int(resp.UsageMetadata.PromptTokenCount) - cached
@@ -1342,7 +1446,6 @@ func (s *stream) processChunk(resp *genai.GenerateContentResponse) {
 	}
 	candidate := resp.Candidates[0]
 
-	// Map finish reason (may be overridden by tool call detection in finalize).
 	if candidate.FinishReason != "" {
 		s.msg.RawStopReason = string(candidate.FinishReason)
 		s.msg.StopReason = mapFinishReason(candidate.FinishReason)
@@ -1362,61 +1465,65 @@ func (s *stream) processPart(part *genai.Part) {
 	case part.FunctionCall != nil:
 		s.hasToolCall = true
 		args, _ := json.Marshal(part.FunctionCall.Args)
-		id := generateToolCallID()
+		// Prefer SDK-provided ID; generate client-side as fallback.
+		id := part.FunctionCall.ID
+		if id == "" {
+			id = generateToolCallID()
+		}
 		call := pipe.ToolCallBlock{
 			ID:        id,
 			Name:      part.FunctionCall.Name,
 			Arguments: json.RawMessage(args),
 		}
 		s.msg.Content = append(s.msg.Content, call)
-		s.blockIndex++
+		s.blocks = append(s.blocks, &blockState{blockType: "tool_call"})
 		s.pending = append(s.pending,
 			pipe.EventToolCallBegin{ID: id, Name: part.FunctionCall.Name},
 			pipe.EventToolCallEnd{Call: call},
 		)
 
 	case part.Thought && part.Text != "":
-		idx := s.findOrCreateThinkingBlock()
-		s.thinkingBuf += part.Text
-		if part.ThoughtSignature != "" {
-			s.thinkingSig += part.ThoughtSignature
+		// Append-based: accumulate into current thinking block if the last
+		// block is thinking; otherwise start a new one.
+		idx := s.currentBlockIndex("thinking")
+		bs := s.blocks[idx]
+		bs.textBuf += part.Text
+		if len(part.ThoughtSignature) > 0 {
+			bs.signature = append(bs.signature, part.ThoughtSignature...)
 		}
 		var sig []byte
-		if s.thinkingSig != "" {
-			sig = []byte(s.thinkingSig)
+		if len(bs.signature) > 0 {
+			sig = bs.signature
 		}
-		s.msg.Content[idx] = pipe.ThinkingBlock{Thinking: s.thinkingBuf, Signature: sig}
+		s.msg.Content[idx] = pipe.ThinkingBlock{Thinking: bs.textBuf, Signature: sig}
 		s.pending = append(s.pending, pipe.EventThinkingDelta{Index: idx, Delta: part.Text})
 
 	case part.Text != "":
-		idx := s.findOrCreateTextBlock()
-		s.textBuf += part.Text
-		s.msg.Content[idx] = pipe.TextBlock{Text: s.textBuf}
+		idx := s.currentBlockIndex("text")
+		bs := s.blocks[idx]
+		bs.textBuf += part.Text
+		s.msg.Content[idx] = pipe.TextBlock{Text: bs.textBuf}
 		s.pending = append(s.pending, pipe.EventTextDelta{Index: idx, Delta: part.Text})
 	}
 }
 
-func (s *stream) findOrCreateThinkingBlock() int {
-	for i, b := range s.msg.Content {
-		if _, ok := b.(pipe.ThinkingBlock); ok {
-			return i
-		}
+// currentBlockIndex returns the index of the current block if it matches the
+// given type. If the last block is a different type (or no blocks exist), a new
+// block is appended. This preserves ordering for interleaved content.
+func (s *stream) currentBlockIndex(blockType string) int {
+	if n := len(s.blocks); n > 0 && s.blocks[n-1].blockType == blockType {
+		return n - 1
 	}
-	idx := len(s.msg.Content)
-	s.msg.Content = append(s.msg.Content, pipe.ThinkingBlock{})
-	s.blockIndex++
-	return idx
-}
-
-func (s *stream) findOrCreateTextBlock() int {
-	for i, b := range s.msg.Content {
-		if _, ok := b.(pipe.TextBlock); ok {
-			return i
-		}
+	// Start a new block.
+	idx := len(s.blocks)
+	s.blocks = append(s.blocks, &blockState{blockType: blockType})
+	// Append placeholder content block.
+	switch blockType {
+	case "thinking":
+		s.msg.Content = append(s.msg.Content, pipe.ThinkingBlock{})
+	case "text":
+		s.msg.Content = append(s.msg.Content, pipe.TextBlock{})
 	}
-	idx := len(s.msg.Content)
-	s.msg.Content = append(s.msg.Content, pipe.TextBlock{})
-	s.blockIndex++
 	return idx
 }
 
@@ -1435,61 +1542,14 @@ func mapFinishReason(reason genai.FinishReason) pipe.StopReason {
 	}
 }
 
-// generateToolCallID generates a unique ID for a tool call.
-// Gemini doesn't provide tool call IDs, so we generate them client-side.
-func generateToolCallID() string {
-	return "call_" + randomID()
-}
-
-// randomID generates a random string for tool call IDs.
-// Uses crypto/rand for uniqueness.
-func randomID() string {
-	b := make([]byte, 16)
-	// Use crypto/rand; fall back to timestamp if it fails.
-	_, _ = cryptoRead(b)
-	return fmt.Sprintf("%x", b)
-}
-
-// cryptoRead is a variable for testing.
-var cryptoRead = cryptoRandRead
-
-func cryptoRandRead(b []byte) (int, error) {
-	// Import at the top of the file.
-	return randReader.Read(b)
-}
-```
-
-**Note**: The above has some complexity with random ID generation. Let me simplify. Actually, for the implementation, use `crypto/rand` directly. The test can just check that the ID is non-empty and starts with `"call_"`. Here's the cleaner version of the ID generation at the top of the file with proper imports:
-
-The imports for `stream.go` should be:
-
-```go
-import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
-	"iter"
-	"sync"
-
-	"github.com/fwojciec/pipe"
-	"google.golang.org/genai"
-)
-```
-
-And replace the ID functions with:
-
-```go
+// generateToolCallID generates a unique fallback ID for tool calls
+// when the SDK doesn't provide one.
 func generateToolCallID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return "call_" + hex.EncodeToString(b)
 }
 ```
-
-Remove `randomID`, `cryptoRead`, `cryptoRandRead`, `randReader`.
 
 **Step 4: Run tests to verify they pass**
 
@@ -1510,15 +1570,9 @@ git commit -m "Add Gemini stream wrapping SDK iterator into pipe.Stream"
 **Files:**
 - Modify: `cmd/pipe/main.go`
 
-**Step 1: Write the failing test**
+**Step 1: Create provider.go with resolveProvider**
 
-Add to `cmd/pipe/` a new test file or add to existing — but since `main.go` has `run()` which isn't easily testable without refactoring, we'll test the provider resolution logic as an extracted function.
-
-Create a helper function and test. Add to `cmd/pipe/main.go` a `resolveProvider` function, then test it.
-
-Actually, given that `cmd/pipe/` wires things together and the CLAUDE.md says `cmd/pipe/` wires everything, keep this simple. The provider resolution logic is straightforward enough to just implement and manually verify, or add a simple unit test for the resolution function.
-
-Create `cmd/pipe/provider.go`:
+Extract provider resolution into a testable function in `cmd/pipe/provider.go`:
 
 ```go
 package main
@@ -1581,13 +1635,67 @@ func resolveProvider(ctx context.Context, providerFlag, apiKeyFlag string) (pipe
 }
 ```
 
-Update `main.go` `run()` function to use the new resolver instead of the hardcoded Anthropic client. Replace the flag parsing and provider creation sections:
+**Step 2: Write tests for resolveProvider**
 
-- Add `-provider` flag
-- Remove hardcoded `ANTHROPIC_API_KEY` check
-- Call `resolveProvider(ctx, *providerFlag, *apiKey)`
+Create `cmd/pipe/provider_test.go`:
 
-**Step 2: Update main.go**
+```go
+package main
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestResolveProvider_ExplicitAnthropic(t *testing.T) {
+	t.Parallel()
+	p, err := resolveProvider(context.Background(), "anthropic", "sk-test")
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+}
+
+func TestResolveProvider_UnknownProvider(t *testing.T) {
+	t.Parallel()
+	_, err := resolveProvider(context.Background(), "openai", "key")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown provider")
+}
+
+func TestResolveProvider_NoKeysNoFlag(t *testing.T) {
+	t.Parallel()
+	// Unset env vars for this test.
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	_, err := resolveProvider(context.Background(), "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no API key found")
+}
+
+func TestResolveProvider_BothKeysNoFlag(t *testing.T) {
+	t.Parallel()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
+	t.Setenv("GEMINI_API_KEY", "gk-gem")
+	_, err := resolveProvider(context.Background(), "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple API keys")
+}
+
+func TestResolveProvider_AutoDetectAnthropic(t *testing.T) {
+	t.Parallel()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
+	t.Setenv("GEMINI_API_KEY", "")
+	p, err := resolveProvider(context.Background(), "", "")
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+}
+```
+
+Note: these tests use internal package access (`package main`) which is allowed for `cmd/` wiring tests.
+
+**Step 3: Update main.go**
 
 In `cmd/pipe/main.go`, the `run()` function changes:
 
@@ -1621,20 +1729,20 @@ func run() error {
 	// ... rest unchanged from "Create tool executor" onward ...
 ```
 
-**Step 3: Run the build**
+**Step 4: Run tests and build**
 
-Run: `go build ./cmd/pipe/`
-Expected: SUCCESS
+Run: `go test ./cmd/pipe/... -count=1 && go build ./cmd/pipe/`
+Expected: PASS + SUCCESS
 
-**Step 4: Run all tests**
+**Step 5: Run all tests**
 
 Run: `go test ./... -count=1`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
-git add cmd/pipe/main.go cmd/pipe/provider.go
+git add cmd/pipe/main.go cmd/pipe/provider.go cmd/pipe/provider_test.go
 git commit -m "Add provider selection with -provider flag and env var auto-detect"
 ```
 
