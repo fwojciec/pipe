@@ -21,6 +21,17 @@ func initModel(t *testing.T, run bt.AgentFunc) bt.Model {
 	return model
 }
 
+// initModelWithSize creates a model with a custom terminal size.
+func initModelWithSize(t *testing.T, run bt.AgentFunc, width, height int) bt.Model {
+	t.Helper()
+	session := &pipe.Session{}
+	m := bt.New(run, session)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model, ok := updated.(bt.Model)
+	require.True(t, ok)
+	return model
+}
+
 // nopAgent is a mock agent that does nothing.
 func nopAgent(_ context.Context, _ *pipe.Session, _ func(pipe.Event)) error {
 	return nil

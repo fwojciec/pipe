@@ -39,6 +39,7 @@ type Model struct {
 func New(run AgentFunc, session *pipe.Session) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type a message..."
+	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 0
 
@@ -89,7 +90,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StreamEventMsg:
 		m.processEvent(msg.Event)
-		m.Viewport.SetContent(m.output.String())
+		m.Viewport.SetContent(m.renderContent())
 		m.Viewport.GotoBottom()
 		if m.eventCh != nil {
 			return m, listenForEvent(m.eventCh, m.doneCh)
@@ -111,11 +112,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Pass remaining messages to sub-components.
+	// Viewport always receives messages for scrolling (keyboard and mouse).
 	var cmd tea.Cmd
-	if m.running {
-		m.Viewport, cmd = m.Viewport.Update(msg)
-		cmds = append(cmds, cmd)
-	} else {
+	m.Viewport, cmd = m.Viewport.Update(msg)
+	cmds = append(cmds, cmd)
+
+	if !m.running {
 		m.Input, cmd = m.Input.Update(msg)
 		cmds = append(cmds, cmd)
 	}
@@ -146,10 +148,10 @@ func (m Model) View() string {
 }
 
 func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
-	inputHeight := 1
+	inputH := 1
 	statusHeight := 1
 	borderHeight := 2 // newlines between sections
-	vpHeight := msg.Height - inputHeight - statusHeight - borderHeight
+	vpHeight := msg.Height - inputH - statusHeight - borderHeight
 
 	if vpHeight < 1 {
 		vpHeight = 1
@@ -157,6 +159,9 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 
 	if !m.ready {
 		m.Viewport = viewport.New(msg.Width, vpHeight)
+		m.renderSession()
+		m.Viewport.SetContent(m.renderContent())
+		m.Viewport.GotoBottom()
 		m.ready = true
 	} else {
 		m.Viewport.Width = msg.Width
@@ -189,11 +194,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.submitInput(text)
 	}
 
-	// Pass key to input when not running.
+	// When idle, pass keys to both textarea (for typing) and viewport
+	// (for scrolling). Only forward non-character keys to viewport to avoid
+	// conflicts (e.g. 'j'/'k' are viewport scroll AND text characters).
 	if !m.running {
 		var cmd tea.Cmd
+		var cmds []tea.Cmd
+
+		if msg.Type != tea.KeyRunes {
+			m.Viewport, cmd = m.Viewport.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
 		m.Input, cmd = m.Input.Update(msg)
-		return m, cmd
+		cmds = append(cmds, cmd)
+
+		return m, tea.Batch(cmds...)
 	}
 
 	return m, nil
@@ -212,7 +228,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 
 	// Show user message in output.
 	m.output.WriteString("\n> " + text + "\n\n")
-	m.Viewport.SetContent(m.output.String())
+	m.Viewport.SetContent(m.renderContent())
 	m.Viewport.GotoBottom()
 
 	// Set up channels and context for agent run.
@@ -228,6 +244,35 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
 		listenForEvent(m.eventCh, m.doneCh),
 	)
+}
+
+// renderSession writes existing session messages to the output buffer.
+func (m Model) renderSession() {
+	for _, msg := range m.session.Messages {
+		switch msg := msg.(type) {
+		case pipe.UserMessage:
+			for _, b := range msg.Content {
+				if tb, ok := b.(pipe.TextBlock); ok {
+					m.output.WriteString("\n> " + tb.Text + "\n\n")
+				}
+			}
+		case pipe.AssistantMessage:
+			for _, b := range msg.Content {
+				switch cb := b.(type) {
+				case pipe.TextBlock:
+					m.output.WriteString(cb.Text)
+				case pipe.ToolCallBlock:
+					fmt.Fprintf(m.output, "\n--- tool: %s ---\n--- end ---\n\n", cb.Name)
+				}
+			}
+		case pipe.ToolResultMessage:
+			// Skip tool results in output for now.
+		}
+	}
+}
+
+func (m Model) renderContent() string {
+	return lipgloss.NewStyle().Width(m.Viewport.Width).Render(m.output.String())
 }
 
 func (m Model) processEvent(evt pipe.Event) {

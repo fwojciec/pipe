@@ -2,6 +2,7 @@ package bubbletea_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,23 @@ func TestModel_Update(t *testing.T) {
 		model := updated.(bt.Model)
 
 		assert.Contains(t, model.View(), "hello")
+	})
+
+	t.Run("long lines are word-wrapped to viewport width", func(t *testing.T) {
+		t.Parallel()
+
+		// Use a narrow viewport so wrapping is obvious.
+		m := initModelWithSize(t, nopAgent, 30, 20)
+
+		// Build a line much wider than 30 columns.
+		longLine := "short words that keep going and going beyond the viewport width easily"
+		updated, _ := m.Update(bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: longLine}})
+		model := updated.(bt.Model)
+
+		view := model.View()
+		// Without wrapping, "easily" is truncated at column 30.
+		// With wrapping, it flows to the next line and remains visible.
+		assert.Contains(t, view, "easily")
 	})
 
 	t.Run("tool call begin shows tool name", func(t *testing.T) {
@@ -306,5 +324,56 @@ func TestModel_Integration(t *testing.T) {
 		lines := strings.Split(view, "\n")
 		// View should be constrained to viewport height, not all 50 lines.
 		assert.Less(t, len(lines), 50)
+	})
+
+	t.Run("viewport accepts scroll keys when idle", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		require.False(t, m.Running())
+
+		// Fill viewport with numbered lines.
+		for i := range 30 {
+			updated, _ := m.Update(bt.StreamEventMsg{Event: pipe.EventTextDelta{
+				Delta: fmt.Sprintf("line-%d\n", i),
+			}})
+			m = updated.(bt.Model)
+		}
+
+		// Viewport should be at the bottom (auto-scroll).
+		viewBefore := m.Viewport.View()
+		assert.Contains(t, viewBefore, "line-29")
+
+		// Send page-up to scroll up while idle.
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		m = updated.(bt.Model)
+
+		// After scrolling up, the last line should no longer be visible.
+		viewAfter := m.Viewport.View()
+		assert.NotContains(t, viewAfter, "line-29")
+	})
+
+	t.Run("existing session messages render on init", func(t *testing.T) {
+		t.Parallel()
+
+		session := &pipe.Session{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{
+					pipe.TextBlock{Text: "hello there"},
+				}},
+				pipe.AssistantMessage{Content: []pipe.ContentBlock{
+					pipe.TextBlock{Text: "Hi! How can I help?"},
+				}},
+			},
+		}
+		m := bt.New(nopAgent, session)
+
+		// Initialize viewport.
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model := updated.(bt.Model)
+
+		view := model.View()
+		assert.Contains(t, view, "hello there")
+		assert.Contains(t, view, "Hi! How can I help?")
 	})
 }

@@ -17,7 +17,7 @@ type AgentFunc func(ctx context.Context, session *pipe.Session, onEvent func(pip
 // exits. The context is used for graceful shutdown — when cancelled, the
 // program quits.
 func Run(ctx context.Context, m Model) error {
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	done := make(chan struct{})
 	go func() {
 		select {
