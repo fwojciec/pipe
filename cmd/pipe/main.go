@@ -3,13 +3,15 @@
 // Usage:
 //
 //	ANTHROPIC_API_KEY=sk-... pipe [flags]
+//	GEMINI_API_KEY=gk-...   pipe [flags]
 //
 // Flags:
 //
+//	-provider string     Provider: anthropic, gemini (auto-detected from env vars if omitted)
 //	-model string        Model ID (default: provider default)
 //	-session string      Path to session file to resume
 //	-system-prompt string Path to system prompt file (default: .pipe/prompt.md)
-//	-api-key string      Anthropic API key (overrides ANTHROPIC_API_KEY env var)
+//	-api-key string      API key (overrides provider's env var)
 package main
 
 import (
@@ -23,7 +25,6 @@ import (
 	"time"
 
 	"github.com/fwojciec/pipe"
-	"github.com/fwojciec/pipe/anthropic"
 	bt "github.com/fwojciec/pipe/bubbletea"
 	pipejson "github.com/fwojciec/pipe/json"
 )
@@ -40,20 +41,23 @@ func main() {
 func run() error {
 	// Parse flags.
 	var (
-		model       = flag.String("model", "", "Model ID (provider-specific)")
-		sessionPath = flag.String("session", "", "Path to session file to resume")
-		promptPath  = flag.String("system-prompt", defaultPromptPath, "Path to system prompt file")
-		apiKey      = flag.String("api-key", "", "Anthropic API key (overrides ANTHROPIC_API_KEY)")
+		model        = flag.String("model", "", "Model ID (provider-specific)")
+		sessionPath  = flag.String("session", "", "Path to session file to resume")
+		promptPath   = flag.String("system-prompt", defaultPromptPath, "Path to system prompt file")
+		providerFlag = flag.String("provider", "", "Provider: anthropic, gemini (auto-detected from env vars if omitted)")
+		apiKey       = flag.String("api-key", "", "API key (overrides provider's env var)")
 	)
 	flag.Parse()
 
-	// Resolve API key.
-	key := *apiKey
-	if key == "" {
-		key = os.Getenv("ANTHROPIC_API_KEY")
-	}
-	if key == "" {
-		return fmt.Errorf("ANTHROPIC_API_KEY not set (use -api-key flag or environment variable)")
+	// Handle OS signals for graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// Resolve provider. Env vars are read here and passed as values.
+	provider, err := resolveProvider(ctx, *providerFlag, *apiKey,
+		os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("GEMINI_API_KEY"))
+	if err != nil {
+		return err
 	}
 
 	// Load or create session.
@@ -61,9 +65,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-
-	// Create provider.
-	provider := anthropic.New(key)
 
 	// Create tool executor and get tool definitions.
 	exec := &executor{}
@@ -84,10 +85,6 @@ func run() error {
 
 	// Create and run TUI.
 	tuiModel := bt.New(agentFn, &session)
-
-	// Handle OS signals for graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
 	if err := bt.Run(ctx, tuiModel); err != nil {
 		return fmt.Errorf("TUI: %w", err)
