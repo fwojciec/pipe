@@ -4,7 +4,7 @@
 
 **Goal:** Refactor the monolithic TUI into a tree-of-models architecture with themed message blocks, markdown rendering, and multi-line input.
 
-**Architecture:** Tree-of-models with a MessageBlock interface. Root model owns a flat `[]MessageBlock` list rendered into a viewport. Each block type (user message, assistant text, thinking, tool call, error) is its own model with `View(width int) string`. Custom goldmark ANSI renderer for markdown. Forked textarea for multi-line input. ANSI-derived theming mapped to terminal's base 16 colors.
+**Architecture:** Tree-of-models with a MessageBlock interface. Root model owns a flat `[]MessageBlock` list rendered into a viewport. Each block type (user message, assistant text, thinking, tool call, tool result, error) is its own model with `View(width int) string`. Custom goldmark ANSI renderer for markdown. Forked textarea for multi-line input. ANSI-derived theming mapped to terminal's base 16 colors. Event-to-block correlation uses Index/ID fields from events, not last-block-type heuristics.
 
 **Tech Stack:** Go 1.24, Bubble Tea v1.3, bubbles v1.0, lipgloss v1.1, goldmark (new dep), teatest (new dep)
 
@@ -42,15 +42,14 @@ func TestDefaultTheme(t *testing.T) {
 
 	theme := pipe.DefaultTheme()
 
-	// Verify all fields are set (non-zero ANSI indices or explicit 0 for black).
-	assert.Equal(t, 4, theme.UserMsg)    // blue
-	assert.Equal(t, 1, theme.Error)      // red
-	assert.Equal(t, 3, theme.ToolCall)   // yellow
-	assert.Equal(t, 8, theme.Thinking)   // bright black
-	assert.Equal(t, 2, theme.Success)    // green
-	assert.Equal(t, 8, theme.Muted)      // bright black
-	assert.Equal(t, 0, theme.CodeBg)     // black
-	assert.Equal(t, 5, theme.Accent)     // magenta
+	assert.Equal(t, 4, theme.UserMsg)
+	assert.Equal(t, 1, theme.Error)
+	assert.Equal(t, 3, theme.ToolCall)
+	assert.Equal(t, 8, theme.Thinking)
+	assert.Equal(t, 2, theme.Success)
+	assert.Equal(t, 8, theme.Muted)
+	assert.Equal(t, 0, theme.CodeBg)
+	assert.Equal(t, 5, theme.Accent)
 }
 ```
 
@@ -84,24 +83,21 @@ type Theme struct {
 // DefaultTheme returns the default ANSI color mapping.
 func DefaultTheme() Theme {
 	return Theme{
-		Foreground: -1, // terminal default
-		Background: -1, // terminal default
-		UserMsg:    4,  // blue
-		Thinking:   8,  // bright black (gray)
-		ToolCall:   3,  // yellow
-		Error:      1,  // red
-		Success:    2,  // green
-		Muted:      8,  // bright black (gray)
-		CodeBg:     0,  // black
-		Accent:     5,  // magenta
+		Foreground: -1,
+		Background: -1,
+		UserMsg:    4,
+		Thinking:   8,
+		ToolCall:   3,
+		Error:      1,
+		Success:    2,
+		Muted:      8,
+		CodeBg:     0,
+		Accent:     5,
 	}
 }
 ```
 
 **Step 4: Run test to verify it passes**
-
-Run: `go test ./... -run TestDefaultTheme -v`
-Expected: PASS
 
 **Step 5: Run `make validate`**
 
@@ -139,7 +135,6 @@ func TestNewStyles(t *testing.T) {
 	theme := pipe.DefaultTheme()
 	styles := bt.NewStyles(theme)
 
-	// Styles should produce non-empty rendered strings.
 	assert.NotEmpty(t, styles.UserMsg.Render("test"))
 	assert.NotEmpty(t, styles.Error.Render("test"))
 	assert.NotEmpty(t, styles.Thinking.Render("test"))
@@ -150,9 +145,6 @@ func TestNewStyles(t *testing.T) {
 ```
 
 **Step 2: Run test to verify it fails**
-
-Run: `go test ./bubbletea/... -run TestNewStyles -v`
-Expected: FAIL — `NewStyles` not defined
 
 **Step 3: Write minimal implementation**
 
@@ -216,8 +208,7 @@ git commit -m "Add Styles mapping from Theme to lipgloss"
 **Files:**
 - Create: `bubbletea/block.go`
 
-No test needed — this is an interface definition. Compliance checks will be added
-in each concrete block's production file.
+No test needed — interface definition only. Compliance checks added per concrete block.
 
 **Step 1: Write the interface**
 
@@ -233,12 +224,11 @@ type MessageBlock interface {
 	Update(tea.Msg) (MessageBlock, tea.Cmd)
 	View(width int) string
 }
-```
 
-Note: `Init()` and `Height()` omitted from MVP. Init is unnecessary — blocks don't
-have commands to run on startup. Height can be computed from `View()` output when
-needed for scroll math. Keep the interface minimal; add methods only when tests
-demand them.
+// ToggleMsg tells a collapsible block to toggle its collapsed state.
+// Sent by the root model when the user presses the toggle key on a focused block.
+type ToggleMsg struct{}
+```
 
 **Step 2: Run `make validate`**
 
@@ -246,7 +236,7 @@ demand them.
 
 ```bash
 git add bubbletea/block.go
-git commit -m "Add MessageBlock interface"
+git commit -m "Add MessageBlock interface and ToggleMsg"
 ```
 
 ---
@@ -275,23 +265,19 @@ func TestUserMessageBlock_View(t *testing.T) {
 
 	t.Run("renders text with prompt prefix", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewUserMessageBlock("hello world", styles)
 		view := block.View(80)
-
 		assert.Contains(t, view, ">")
 		assert.Contains(t, view, "hello world")
 	})
 
 	t.Run("wraps long text to width", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		longText := "short words that keep going and going beyond the viewport width easily"
 		block := bt.NewUserMessageBlock(longText, styles)
 		view := block.View(30)
-
 		assert.Contains(t, view, "easily")
 	})
 }
@@ -309,26 +295,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Interface compliance.
 var _ MessageBlock = (*UserMessageBlock)(nil)
 
-// UserMessageBlock renders a user message with a ">" prefix.
 type UserMessageBlock struct {
 	text   string
 	styles Styles
 }
 
-// NewUserMessageBlock creates a UserMessageBlock.
 func NewUserMessageBlock(text string, styles Styles) *UserMessageBlock {
 	return &UserMessageBlock{text: text, styles: styles}
 }
 
-// Update implements MessageBlock.
 func (b *UserMessageBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 	return b, nil
 }
 
-// View implements MessageBlock.
 func (b *UserMessageBlock) View(width int) string {
 	content := b.styles.UserMsg.Render("> ") + b.text
 	return lipgloss.NewStyle().Width(width).Render(content)
@@ -394,7 +375,6 @@ import (
 
 var _ MessageBlock = (*ErrorBlock)(nil)
 
-// ErrorBlock renders an error message.
 type ErrorBlock struct {
 	err    error
 	styles Styles
@@ -449,11 +429,9 @@ func TestThinkingBlock_View(t *testing.T) {
 
 	t.Run("collapsed shows indicator and label", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewThinkingBlock(styles)
 		block.Append("deep thoughts here")
-
 		view := block.View(80)
 		assert.Contains(t, view, "▶")
 		assert.Contains(t, view, "Thinking")
@@ -462,26 +440,35 @@ func TestThinkingBlock_View(t *testing.T) {
 
 	t.Run("expanded shows content", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewThinkingBlock(styles)
 		block.Append("deep thoughts here")
 		block.Toggle()
-
 		view := block.View(80)
 		assert.Contains(t, view, "▼")
 		assert.Contains(t, view, "deep thoughts here")
 	})
 
+	t.Run("toggle via ToggleMsg", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewThinkingBlock(styles)
+		block.Append("thoughts")
+		// Starts collapsed.
+		assert.NotContains(t, block.View(80), "thoughts")
+		// ToggleMsg expands it.
+		updated, _ := block.Update(bt.ToggleMsg{})
+		block = updated.(*bt.ThinkingBlock)
+		assert.Contains(t, block.View(80), "thoughts")
+	})
+
 	t.Run("append accumulates text", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewThinkingBlock(styles)
 		block.Append("hello ")
 		block.Append("world")
 		block.Toggle()
-
 		view := block.View(80)
 		assert.Contains(t, view, "hello world")
 	})
@@ -504,7 +491,6 @@ import (
 
 var _ MessageBlock = (*ThinkingBlock)(nil)
 
-// ThinkingBlock renders a collapsible thinking section.
 type ThinkingBlock struct {
 	content   strings.Builder
 	collapsed bool
@@ -524,6 +510,9 @@ func (b *ThinkingBlock) Toggle() {
 }
 
 func (b *ThinkingBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
+	if _, ok := msg.(ToggleMsg); ok {
+		b.collapsed = !b.collapsed
+	}
 	return b, nil
 }
 
@@ -532,13 +521,10 @@ func (b *ThinkingBlock) View(width int) string {
 	if !b.collapsed {
 		indicator = "▼"
 	}
-
 	header := b.styles.Thinking.Render(indicator + " Thinking")
-
 	if b.collapsed {
 		return lipgloss.NewStyle().Width(width).Render(header)
 	}
-
 	content := b.styles.Thinking.Render(b.content.String())
 	full := header + "\n" + content
 	return lipgloss.NewStyle().Width(width).Render(full)
@@ -551,7 +537,7 @@ func (b *ThinkingBlock) View(width int) string {
 
 ```bash
 git add bubbletea/block_thinking.go bubbletea/block_thinking_test.go
-git commit -m "Add collapsible ThinkingBlock"
+git commit -m "Add collapsible ThinkingBlock with ToggleMsg support"
 ```
 
 ---
@@ -568,6 +554,7 @@ git commit -m "Add collapsible ThinkingBlock"
 package bubbletea_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -580,10 +567,8 @@ func TestToolCallBlock_View(t *testing.T) {
 
 	t.Run("collapsed shows tool name", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
-		block := bt.NewToolCallBlock("read", styles)
-
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
 		view := block.View(80)
 		assert.Contains(t, view, "▶")
 		assert.Contains(t, view, "read")
@@ -591,28 +576,40 @@ func TestToolCallBlock_View(t *testing.T) {
 
 	t.Run("expanded shows arguments", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
-		block := bt.NewToolCallBlock("read", styles)
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
 		block.AppendArgs(`{"path": "/tmp/foo"}`)
 		block.Toggle()
-
 		view := block.View(80)
 		assert.Contains(t, view, "▼")
 		assert.Contains(t, view, "/tmp/foo")
 	})
 
-	t.Run("finalized shows result summary", func(t *testing.T) {
+	t.Run("finalize with call applies arguments from EventToolCallEnd", func(t *testing.T) {
 		t.Parallel()
-
 		styles := bt.NewStyles(pipe.DefaultTheme())
-		block := bt.NewToolCallBlock("bash", styles)
-		block.Finalize()
-
+		// Simulate Gemini pattern: begin + end with no deltas.
+		block := bt.NewToolCallBlock("bash", "tc-2", styles)
+		block.FinalizeWithCall(pipe.ToolCallBlock{
+			ID:        "tc-2",
+			Name:      "bash",
+			Arguments: json.RawMessage(`{"command":"ls"}`),
+		})
+		block.Toggle()
 		view := block.View(80)
-		assert.Contains(t, view, "bash")
-		// Finalized blocks start collapsed.
-		assert.Contains(t, view, "▶")
+		assert.Contains(t, view, "ls")
+	})
+
+	t.Run("toggle via ToggleMsg", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
+		block.AppendArgs(`{"path":"x"}`)
+		// Starts collapsed.
+		assert.NotContains(t, block.View(80), "path")
+		updated, _ := block.Update(bt.ToggleMsg{})
+		block = updated.(*bt.ToolCallBlock)
+		assert.Contains(t, block.View(80), "path")
 	})
 }
 ```
@@ -629,22 +626,26 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fwojciec/pipe"
 )
 
 var _ MessageBlock = (*ToolCallBlock)(nil)
 
-// ToolCallBlock renders a collapsible tool call section.
 type ToolCallBlock struct {
 	name      string
+	id        string
 	args      strings.Builder
 	collapsed bool
 	finalized bool
 	styles    Styles
 }
 
-func NewToolCallBlock(name string, styles Styles) *ToolCallBlock {
-	return &ToolCallBlock{name: name, collapsed: true, styles: styles}
+func NewToolCallBlock(name, id string, styles Styles) *ToolCallBlock {
+	return &ToolCallBlock{name: name, id: id, collapsed: true, styles: styles}
 }
+
+// ID returns the tool call ID for event correlation.
+func (b *ToolCallBlock) ID() string { return b.id }
 
 func (b *ToolCallBlock) AppendArgs(text string) {
 	b.args.WriteString(text)
@@ -654,11 +655,20 @@ func (b *ToolCallBlock) Toggle() {
 	b.collapsed = !b.collapsed
 }
 
-func (b *ToolCallBlock) Finalize() {
+// FinalizeWithCall applies the completed tool call, including arguments
+// from EventToolCallEnd. This handles providers like Gemini that emit
+// begin+end without intermediate deltas.
+func (b *ToolCallBlock) FinalizeWithCall(call pipe.ToolCallBlock) {
+	if b.args.Len() == 0 && len(call.Arguments) > 0 {
+		b.args.Write(call.Arguments)
+	}
 	b.finalized = true
 }
 
 func (b *ToolCallBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
+	if _, ok := msg.(ToggleMsg); ok {
+		b.collapsed = !b.collapsed
+	}
 	return b, nil
 }
 
@@ -667,13 +677,10 @@ func (b *ToolCallBlock) View(width int) string {
 	if !b.collapsed {
 		indicator = "▼"
 	}
-
 	header := b.styles.ToolCall.Render(indicator + " " + b.name)
-
 	if b.collapsed {
 		return lipgloss.NewStyle().Width(width).Render(header)
 	}
-
 	content := b.args.String()
 	full := header + "\n" + content
 	return lipgloss.NewStyle().Width(width).Render(full)
@@ -686,7 +693,109 @@ func (b *ToolCallBlock) View(width int) string {
 
 ```bash
 git add bubbletea/block_toolcall.go bubbletea/block_toolcall_test.go
-git commit -m "Add collapsible ToolCallBlock"
+git commit -m "Add collapsible ToolCallBlock with ID correlation and FinalizeWithCall"
+```
+
+---
+
+### Task 7b: ToolResultBlock
+
+**Files:**
+- Create: `bubbletea/block_toolresult.go`
+- Test: `bubbletea/block_toolresult_test.go`
+
+The design specifies full scope including tool results. This block renders below the
+corresponding ToolCallBlock in the flat list.
+
+**Step 1: Write the failing tests**
+
+```go
+package bubbletea_test
+
+import (
+	"testing"
+
+	"github.com/fwojciec/pipe"
+	bt "github.com/fwojciec/pipe/bubbletea"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestToolResultBlock_View(t *testing.T) {
+	t.Parallel()
+
+	t.Run("renders result content", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolResultBlock("read", "file contents here", false, styles)
+		view := block.View(80)
+		assert.Contains(t, view, "file contents here")
+	})
+
+	t.Run("error result shows error styling", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolResultBlock("bash", "command failed", true, styles)
+		view := block.View(80)
+		assert.Contains(t, view, "command failed")
+	})
+
+	t.Run("long result wraps to width", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		long := "this is a very long result that should wrap properly within the viewport"
+		block := bt.NewToolResultBlock("read", long, false, styles)
+		view := block.View(30)
+		assert.Contains(t, view, "viewport")
+	})
+}
+```
+
+**Step 2: Run test to verify it fails**
+
+**Step 3: Write minimal implementation**
+
+```go
+package bubbletea
+
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+var _ MessageBlock = (*ToolResultBlock)(nil)
+
+type ToolResultBlock struct {
+	toolName string
+	content  string
+	isError  bool
+	styles   Styles
+}
+
+func NewToolResultBlock(toolName, content string, isError bool, styles Styles) *ToolResultBlock {
+	return &ToolResultBlock{toolName: toolName, content: content, isError: isError, styles: styles}
+}
+
+func (b *ToolResultBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
+	return b, nil
+}
+
+func (b *ToolResultBlock) View(width int) string {
+	style := b.styles.Muted
+	if b.isError {
+		style = b.styles.Error
+	}
+	rendered := style.Render(b.content)
+	return lipgloss.NewStyle().Width(width).Render(rendered)
+}
+```
+
+**Step 4: Run test, then `make validate`**
+
+**Step 5: Commit**
+
+```bash
+git add bubbletea/block_toolresult.go bubbletea/block_toolresult_test.go
+git commit -m "Add ToolResultBlock"
 ```
 
 ---
@@ -703,7 +812,7 @@ This task adds `github.com/yuin/goldmark` as a dependency.
 **Step 1: Add goldmark dependency**
 
 ```bash
-cd /Users/filip/code/go/pipe && go get github.com/yuin/goldmark
+go get github.com/yuin/goldmark
 ```
 
 **Step 2: Write the failing tests**
@@ -712,6 +821,7 @@ cd /Users/filip/code/go/pipe && go get github.com/yuin/goldmark
 package markdown_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -754,11 +864,13 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, result, "code")
 	})
 
-	t.Run("fenced code block", func(t *testing.T) {
+	t.Run("fenced code block preserves content without reflow", func(t *testing.T) {
 		t.Parallel()
-		src := "```go\nfmt.Println(\"hi\")\n```"
-		result := markdown.Render(src, 80, theme)
-		assert.Contains(t, result, "fmt.Println")
+		// Code blocks must NOT be word-wrapped — only paragraphs are.
+		src := "```go\nfmt.Println(\"hello world\")\n```"
+		result := markdown.Render(src, 20, theme)
+		// The code line must remain intact despite width=20.
+		assert.Contains(t, result, `fmt.Println("hello world")`)
 	})
 
 	t.Run("bullet list", func(t *testing.T) {
@@ -777,28 +889,28 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, result, "second")
 	})
 
-	t.Run("link", func(t *testing.T) {
+	t.Run("link shows text and URL", func(t *testing.T) {
 		t.Parallel()
 		result := markdown.Render("[click](https://example.com)", 80, theme)
 		assert.Contains(t, result, "click")
 		assert.Contains(t, result, "example.com")
 	})
 
-	t.Run("wraps to width", func(t *testing.T) {
+	t.Run("paragraph wraps to width", func(t *testing.T) {
 		t.Parallel()
-		long := "word word word word word word word word word word word word word"
-		result := markdown.Render(long, 20, theme)
-		assert.Contains(t, result, "word")
-		// All words should be present (wrapped, not truncated).
-		assert.Contains(t, result, "word")
+		long := "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12"
+		result := markdown.Render(long, 30, theme)
+		// All words present (wrapped, not truncated).
+		assert.Contains(t, result, "word1")
+		assert.Contains(t, result, "word12")
+		// Verify it actually wrapped (output has multiple lines).
+		lines := strings.Split(result, "\n")
+		assert.Greater(t, len(lines), 1)
 	})
 }
 ```
 
 **Step 3: Run tests to verify they fail**
-
-Run: `go test ./markdown/... -v`
-Expected: FAIL — package doesn't exist
 
 **Step 4: Implement the renderer**
 
@@ -811,32 +923,32 @@ package markdown
 
 import "github.com/fwojciec/pipe"
 
-// Render parses markdown source and returns ANSI-styled terminal output
-// wrapped to the given width.
+// Render parses markdown source and returns ANSI-styled terminal output.
+// Paragraphs and list items are word-wrapped to width. Code blocks are
+// rendered at full width without reflow.
 func Render(source string, width int, theme pipe.Theme) string {
 	r := newRenderer(theme)
 	return r.render([]byte(source), width)
 }
 ```
 
-`markdown/renderer.go` — internal renderer implementation. This is the core work:
-a goldmark AST walker that produces ANSI-styled output. Key approach:
+`markdown/renderer.go` — goldmark AST walker producing styled output:
 
 - Use `goldmark.New()` to parse source into AST
-- Walk AST nodes with a custom `renderer.NodeRenderer` implementation
-- For each node kind, emit styled text using lipgloss:
-  - `ast.Heading` → bold + accent color
-  - `ast.Paragraph` → plain text
-  - `ast.FencedCodeBlock` → code background style, preserve whitespace
+- Custom `renderer.NodeRenderer` implementation
+- Per-node rendering:
+  - `ast.Heading` → bold + accent color, no width wrapping
+  - `ast.Paragraph` → `lipgloss.NewStyle().Width(width).Render(text)` for wrapping
+  - `ast.FencedCodeBlock` → code background style, **NO word-wrapping** (preserve whitespace)
   - `ast.Emphasis` (level 1) → italic, (level 2) → bold
   - `ast.CodeSpan` → inline code background
-  - `ast.List` → indented with `- ` or `1. ` markers
-  - `ast.Link` → underlined text + dimmed URL
-- Wrap final output to width using `lipgloss.NewStyle().Width(width)`
+  - `ast.List` / `ast.ListItem` → indented with `- ` or `N. ` markers, item text wrapped to `width - indent`
+  - `ast.Link` → underlined text + dimmed `(URL)`
 
-Reference implementation: `jira4claude/markdown/to_markdown.go` (~278 lines) for
-the AST walking pattern. Our renderer will be similar complexity but output styled
-strings instead of plain markdown.
+**Critical**: Wrapping happens per-block (paragraph, list item), NOT as a
+document-level pass. Code blocks are never reflowed.
+
+Reference: `jira4claude/markdown/to_markdown.go` for AST walking pattern.
 
 **Step 5: Run tests, then `make validate`**
 
@@ -873,12 +985,10 @@ func TestAssistantTextBlock_View(t *testing.T) {
 
 	t.Run("renders markdown", func(t *testing.T) {
 		t.Parallel()
-
 		theme := pipe.DefaultTheme()
 		styles := bt.NewStyles(theme)
 		block := bt.NewAssistantTextBlock(theme, styles)
 		block.Append("hello **world**")
-
 		view := block.View(80)
 		assert.Contains(t, view, "hello")
 		assert.Contains(t, view, "world")
@@ -886,25 +996,21 @@ func TestAssistantTextBlock_View(t *testing.T) {
 
 	t.Run("append accumulates deltas", func(t *testing.T) {
 		t.Parallel()
-
 		theme := pipe.DefaultTheme()
 		styles := bt.NewStyles(theme)
 		block := bt.NewAssistantTextBlock(theme, styles)
 		block.Append("hello ")
 		block.Append("world")
-
 		view := block.View(80)
 		assert.Contains(t, view, "hello world")
 	})
 
-	t.Run("wraps to width", func(t *testing.T) {
+	t.Run("wraps paragraphs to width", func(t *testing.T) {
 		t.Parallel()
-
 		theme := pipe.DefaultTheme()
 		styles := bt.NewStyles(theme)
 		block := bt.NewAssistantTextBlock(theme, styles)
 		block.Append("short words that keep going and going beyond thirty columns easily")
-
 		view := block.View(30)
 		assert.Contains(t, view, "easily")
 	})
@@ -928,7 +1034,6 @@ import (
 
 var _ MessageBlock = (*AssistantTextBlock)(nil)
 
-// AssistantTextBlock renders assistant text with markdown formatting.
 type AssistantTextBlock struct {
 	content strings.Builder
 	theme   pipe.Theme
@@ -952,9 +1057,8 @@ func (b *AssistantTextBlock) View(width int) string {
 }
 ```
 
-Note: McGugan's block-finalization optimization (cache finalized paragraphs, only
-re-render trailing text) is deferred to a follow-up. The initial implementation
-re-renders everything — this is fine for conversations under ~50KB per the research.
+McGugan's block-finalization optimization deferred to follow-up. Full re-render
+is fine for conversations under ~50KB.
 
 **Step 4: Run test, then `make validate`**
 
@@ -974,43 +1078,40 @@ git commit -m "Add AssistantTextBlock with markdown rendering"
 - Create: `bubbletea/textarea/wrap.go`
 - Test: `bubbletea/textarea/textarea_test.go`
 
-This is the largest single task. Port the bubbles textarea, strip it, fix it.
+Port bubbles textarea, strip it, fix it.
 
 **Source:** `~/go/pkg/mod/github.com/charmbracelet/bubbles@v1.0.0/textarea/textarea.go`
 
-**Step 1: Copy and strip textarea source**
-
-Port `textarea.go` from bubbles v1.0.0 into `bubbletea/textarea/`. Strip:
-- `ShowLineNumbers` and all line number rendering logic
-- `Prompt` variations (use empty string always)
-- `FocusedStyle` / `BlurredStyle` complexity (single style)
+**Strip:**
+- `ShowLineNumbers` and all line number rendering
+- `Prompt` variations (always empty)
+- `FocusedStyle` / `BlurredStyle` (single style)
 - Placeholder animation
-- The existing Styles struct (we apply our own theme externally)
+- The existing Styles struct
 
-Keep:
+**Keep:**
 - `[][]rune` text storage
 - Cursor positioning (`row`, `col`, `lastCharOffset`)
-- Word-wrap logic (`wrap()` function → `wrap.go`)
+- Word-wrap logic (`wrap()` → `wrap.go`)
 - `SetWidth()` / `SetHeight()` / `MaxHeight`
 - Key handling (arrows, backspace, delete, home/end, word movement)
-- Viewport scrolling for content taller than visible area
+- Viewport scrolling
 - `Value()` / `SetValue()` / `Reset()`
 - `Focus()` / `Blur()`
 
-Fix:
-- **Cache invalidation**: In `SetWidth()`, after updating `m.width`, clear the
-  memoization cache: `m.cache = newMemoCache(m.MaxHeight)`. This is the one-line
-  fix for the stale cache bug.
+**Fix:**
+- **Cache invalidation**: In `SetWidth()`, after updating `m.width`, reset
+  the memoization cache. This is the root cause of the bubbles textarea bug.
 
-Add:
-- `CheckInputComplete func(value string) bool` — callback field. When set and
-  Enter is pressed, if `CheckInputComplete(m.Value())` returns false, insert a
-  newline instead of sending. The root model sets this to always return true
-  (Enter sends), but the infrastructure supports future conditional behavior.
-- Auto-grow: when content changes, if total soft-wrapped lines < MaxHeight,
-  set visible height to match. Cap at MaxHeight.
+**Add:**
+- `CheckInputComplete func(value string) bool` — callback. When set, Enter
+  calls this. If false, inserts newline. If true (or nil), normal Enter behavior.
+- Auto-grow: When content changes, compute total visible lines. Set visible
+  height to `min(totalLines, MaxHeight)`. Return an `InputHeightMsg{Height int}`
+  command so the root model can recompute viewport layout.
+- Newline insertion via Ctrl+J (portable across all terminals, maps to `\n`).
 
-**Step 2: Write the failing tests**
+**Step 1: Write the failing tests**
 
 ```go
 package textarea_test
@@ -1047,8 +1148,8 @@ func TestTextarea_Basic(t *testing.T) {
 		ta := textarea.New()
 		ta.SetWidth(80)
 		ta.Focus()
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 		assert.Equal(t, "hi", ta.Value())
 	})
 
@@ -1058,8 +1159,19 @@ func TestTextarea_Basic(t *testing.T) {
 		ta.SetWidth(80)
 		ta.Focus()
 		ta.SetValue("line1")
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyEnter})
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyEnter})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+		assert.Equal(t, "line1\n2", ta.Value())
+	})
+
+	t.Run("ctrl+j inserts newline", func(t *testing.T) {
+		t.Parallel()
+		ta := textarea.New()
+		ta.SetWidth(80)
+		ta.Focus()
+		ta.SetValue("line1")
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyCtrlJ})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 		assert.Equal(t, "line1\n2", ta.Value())
 	})
 
@@ -1069,54 +1181,106 @@ func TestTextarea_Basic(t *testing.T) {
 		ta.SetWidth(80)
 		ta.Focus()
 		ta.SetValue("abc")
-		// Move cursor to end.
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyEnd})
-		ta, _ = applyKey(ta, tea.KeyMsg{Type: tea.KeyBackspace})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyEnd})
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyBackspace})
 		assert.Equal(t, "ab", ta.Value())
+	})
+}
+
+func TestTextarea_CheckInputComplete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("enter inserts newline when CheckInputComplete returns false", func(t *testing.T) {
+		t.Parallel()
+		ta := textarea.New()
+		ta.SetWidth(80)
+		ta.Focus()
+		ta.CheckInputComplete = func(value string) bool { return false }
+		ta.SetValue("incomplete")
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyEnter})
+		// Newline inserted, not submitted.
+		assert.Equal(t, "incomplete\n", ta.Value())
+	})
+
+	t.Run("enter submits when CheckInputComplete returns true", func(t *testing.T) {
+		t.Parallel()
+		ta := textarea.New()
+		ta.SetWidth(80)
+		ta.Focus()
+		ta.CheckInputComplete = func(value string) bool { return true }
+		ta.SetValue("complete")
+		ta = applyKey(t, ta, tea.KeyMsg{Type: tea.KeyEnter})
+		// Should NOT insert newline — the root model handles submission.
+		assert.Equal(t, "complete", ta.Value())
+	})
+}
+
+func TestTextarea_AutoGrow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("height increases with content", func(t *testing.T) {
+		t.Parallel()
+		ta := textarea.New()
+		ta.SetWidth(80)
+		ta.SetHeight(1)
+		ta.MaxHeight = 3
+		ta.Focus()
+		ta.SetValue("line1\nline2")
+		// After setting multi-line content, visible height should grow.
+		view := ta.View()
+		assert.Contains(t, view, "line1")
+		assert.Contains(t, view, "line2")
 	})
 }
 
 func TestTextarea_SetWidth_InvalidatesCache(t *testing.T) {
 	t.Parallel()
 
-	// This is the regression test for the bubbles textarea cache bug.
-	// Changing width must produce correct wrapping immediately.
 	ta := textarea.New()
 	ta.SetWidth(80)
 	ta.Focus()
 	ta.SetValue("a long line that should wrap at different widths depending on the setting")
 
-	// Render at width 80 (no wrap expected).
 	view80 := ta.View()
 
-	// Change to narrow width.
 	ta.SetWidth(20)
 	view20 := ta.View()
 
-	// The narrow view should be taller (more wrapped lines).
 	require.NotEqual(t, view80, view20)
 }
 
-// applyKey is a test helper that sends a key message and returns the updated model.
-func applyKey(ta textarea.Model, msg tea.KeyMsg) (textarea.Model, tea.Cmd) {
-	updated, cmd := ta.Update(msg)
-	return updated.(textarea.Model), cmd
+func applyKey(t *testing.T, ta textarea.Model, msg tea.KeyMsg) textarea.Model {
+	t.Helper()
+	updated, _ := ta.Update(msg)
+	model, ok := updated.(textarea.Model)
+	require.True(t, ok)
+	return model
 }
 ```
 
-**Step 3: Run tests to verify they fail**
+**Step 2: Run tests to verify they fail**
 
-**Step 4: Implement the forked textarea**
+**Step 3: Implement the forked textarea**
 
-Port from bubbles source, apply the changes described above. Target ~600-800 LOC.
+Port from bubbles source, apply changes above. Target ~600-800 LOC.
 
-**Step 5: Run tests, then `make validate`**
+The auto-grow feature returns an `InputHeightMsg` command when height changes:
 
-**Step 6: Commit**
+```go
+// InputHeightMsg is sent when the textarea's visible height changes due to
+// auto-grow. The root model uses this to recompute viewport layout.
+type InputHeightMsg struct {
+	Height int
+}
+```
+
+**Step 4: Run tests, then `make validate`**
+
+**Step 5: Commit**
 
 ```bash
 git add bubbletea/textarea/
-git commit -m "Add forked textarea with cache fix and auto-grow"
+git commit -m "Add forked textarea with cache fix, auto-grow, and Ctrl+J newline"
 ```
 
 ---
@@ -1125,14 +1289,14 @@ git commit -m "Add forked textarea with cache fix and auto-grow"
 
 **Files:**
 - Modify: `bubbletea/model.go`
-- Modify: `bubbletea/bubbletea.go` (add Styles to New signature)
+- Modify: `bubbletea/bubbletea_test.go`
+- Modify: `bubbletea/model_test.go`
 
-This is the core refactoring task. Replace the monolithic strings.Builder with
-`[]MessageBlock` and wire all the new components together.
+Replace the monolithic strings.Builder with `[]MessageBlock` and wire all components.
 
-**Step 1: Write failing tests for the new architecture**
+**Step 1: Write failing tests for block assembly with correct event correlation**
 
-Update the test helpers in `bubbletea/bubbletea_test.go` to pass a theme:
+Update test helpers in `bubbletea/bubbletea_test.go`:
 
 ```go
 func initModel(t *testing.T, run bt.AgentFunc) bt.Model {
@@ -1145,39 +1309,74 @@ func initModel(t *testing.T, run bt.AgentFunc) bt.Model {
 	require.True(t, ok)
 	return model
 }
+
+func initModelWithSize(t *testing.T, run bt.AgentFunc, width, height int) bt.Model {
+	t.Helper()
+	session := &pipe.Session{}
+	theme := pipe.DefaultTheme()
+	m := bt.New(run, session, theme)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model, ok := updated.(bt.Model)
+	require.True(t, ok)
+	return model
+}
 ```
 
-Write new tests for block-based behavior:
+New tests for block assembly and event correlation:
 
 ```go
 func TestModel_BlockAssembly(t *testing.T) {
 	t.Parallel()
 
-	t.Run("text delta creates assistant block", func(t *testing.T) {
+	t.Run("text deltas with same index append to same block", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		updated, _ := m.Update(bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hello"}})
-		model := updated.(bt.Model)
-		assert.Contains(t, model.View(), "hello")
-		assert.Equal(t, 1, model.BlockCount())
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "hello "}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "world"}})
+		assert.Contains(t, m.View(), "hello world")
 	})
 
-	t.Run("thinking delta creates thinking block", func(t *testing.T) {
+	t.Run("text deltas with different index create separate blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		updated, _ := m.Update(bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Delta: "hmm"}})
-		model := updated.(bt.Model)
-		// Thinking blocks start collapsed, so content is hidden.
-		assert.Equal(t, 1, model.BlockCount())
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "first"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 1, Delta: "second"}})
+		view := m.View()
+		assert.Contains(t, view, "first")
+		assert.Contains(t, view, "second")
 	})
 
-	t.Run("tool call begin creates tool block", func(t *testing.T) {
+	t.Run("thinking then text creates two blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		updated, _ := m.Update(bt.StreamEventMsg{Event: pipe.EventToolCallBegin{Name: "read"}})
-		model := updated.(bt.Model)
-		assert.Contains(t, model.View(), "read")
-		assert.Equal(t, 1, model.BlockCount())
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "hmm"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "answer"}})
+		assert.Contains(t, m.View(), "answer")
+		// Thinking is collapsed so "hmm" is not visible.
+		assert.NotContains(t, m.View(), "hmm")
+	})
+
+	t.Run("tool call correlated by ID", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-1", Delta: `{"path":"/tmp"}`}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{
+			ID: "tc-1", Name: "read", Arguments: json.RawMessage(`{"path":"/tmp"}`),
+		}}})
+		assert.Contains(t, m.View(), "read")
+	})
+
+	t.Run("interleaved tool calls stay separate", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-1", Delta: "args1"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-2", Delta: "args2"}})
+		view := m.View()
+		assert.Contains(t, view, "read")
+		assert.Contains(t, view, "bash")
 	})
 
 	t.Run("submit creates user block", func(t *testing.T) {
@@ -1185,14 +1384,35 @@ func TestModel_BlockAssembly(t *testing.T) {
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
 		m := bt.New(nopAgent, session, theme)
-		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		m = updated.(bt.Model)
+		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.Input.SetValue("hi")
-		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = updated.(bt.Model)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 		assert.Contains(t, m.View(), "hi")
-		assert.GreaterOrEqual(t, m.BlockCount(), 1)
 	})
+}
+
+func TestModel_BlockToggle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tab toggles focused collapsible block", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Create a thinking block (starts collapsed).
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "thoughts"}})
+		assert.NotContains(t, m.View(), "thoughts")
+		// Send Tab to toggle the focused block.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.Contains(t, m.View(), "thoughts")
+	})
+}
+
+// updateModel is a test helper that sends a message and returns the updated Model.
+func updateModel(t *testing.T, m bt.Model, msg tea.Msg) bt.Model {
+	t.Helper()
+	updated, _ := m.Update(msg)
+	model, ok := updated.(bt.Model)
+	require.True(t, ok)
+	return model
 }
 ```
 
@@ -1200,11 +1420,13 @@ func TestModel_BlockAssembly(t *testing.T) {
 
 **Step 3: Refactor model.go**
 
-Key changes to `Model` struct:
+Key changes:
+
+**Model struct** — remove `output *strings.Builder`, add blocks and theme:
 
 ```go
 type Model struct {
-	Input    textinput.Model  // TODO: replace with forked textarea in Task 12
+	Input    textinput.Model  // Replaced with forked textarea in Task 12
 	Viewport viewport.Model
 
 	run     AgentFunc
@@ -1212,7 +1434,13 @@ type Model struct {
 	theme   pipe.Theme
 	styles  Styles
 
-	blocks  []MessageBlock
+	blocks     []MessageBlock
+	blockFocus int // index of focused block for toggle (-1 = none)
+	// Map of active block indices/IDs for event correlation.
+	activeText     map[int]*AssistantTextBlock  // keyed by EventTextDelta.Index
+	activeThinking map[int]*ThinkingBlock       // keyed by EventThinkingDelta.Index
+	activeToolCall map[string]*ToolCallBlock    // keyed by EventToolCall*.ID
+
 	running bool
 	cancel  context.CancelFunc
 	eventCh chan pipe.Event
@@ -1222,162 +1450,106 @@ type Model struct {
 }
 ```
 
-Remove: `output *strings.Builder`
-Add: `blocks []MessageBlock`, `theme pipe.Theme`, `styles Styles`
-
-Change `New()` signature:
+**New() signature** — takes theme:
 
 ```go
-func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
-	styles := NewStyles(theme)
-	ti := textinput.New()
-	ti.Placeholder = "Type a message..."
-	ti.Prompt = ""
-	ti.Focus()
-	ti.CharLimit = 0
-	return Model{
-		Input:   ti,
-		run:     run,
-		session: session,
-		theme:   theme,
-		styles:  styles,
-	}
-}
+func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model
 ```
 
-Add: `BlockCount() int` method for test access.
-
-Replace `processEvent()` with block-based assembly:
+**processEvent()** — uses Index/ID for correlation:
 
 ```go
 func (m *Model) processEvent(evt pipe.Event) {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
-		if b, ok := m.lastBlock().(*AssistantTextBlock); ok {
+		if b, ok := m.activeText[e.Index]; ok {
 			b.Append(e.Delta)
 		} else {
 			b := NewAssistantTextBlock(m.theme, m.styles)
 			b.Append(e.Delta)
 			m.blocks = append(m.blocks, b)
+			m.activeText[e.Index] = b
 		}
 	case pipe.EventThinkingDelta:
-		if b, ok := m.lastBlock().(*ThinkingBlock); ok {
+		if b, ok := m.activeThinking[e.Index]; ok {
 			b.Append(e.Delta)
 		} else {
 			b := NewThinkingBlock(m.styles)
 			b.Append(e.Delta)
 			m.blocks = append(m.blocks, b)
+			m.activeThinking[e.Index] = b
 		}
 	case pipe.EventToolCallBegin:
-		b := NewToolCallBlock(e.Name, m.styles)
+		b := NewToolCallBlock(e.Name, e.ID, m.styles)
 		m.blocks = append(m.blocks, b)
+		m.activeToolCall[e.ID] = b
 	case pipe.EventToolCallDelta:
-		if b, ok := m.lastBlock().(*ToolCallBlock); ok {
+		if b, ok := m.activeToolCall[e.ID]; ok {
 			b.AppendArgs(e.Delta)
 		}
 	case pipe.EventToolCallEnd:
-		if b, ok := m.lastBlock().(*ToolCallBlock); ok {
-			b.Finalize()
-		}
-	}
-}
-
-func (m Model) lastBlock() MessageBlock {
-	if len(m.blocks) == 0 {
-		return nil
-	}
-	return m.blocks[len(m.blocks)-1]
-}
-```
-
-Replace `renderContent()`:
-
-```go
-func (m Model) renderContent() string {
-	var parts []string
-	for _, b := range m.blocks {
-		parts = append(parts, b.View(m.Viewport.Width))
-	}
-	return strings.Join(parts, "\n\n")
-}
-```
-
-Replace `renderSession()`:
-
-```go
-func (m *Model) renderSession() {
-	for _, msg := range m.session.Messages {
-		switch msg := msg.(type) {
-		case pipe.UserMessage:
-			for _, b := range msg.Content {
-				if tb, ok := b.(pipe.TextBlock); ok {
-					m.blocks = append(m.blocks, NewUserMessageBlock(tb.Text, m.styles))
-				}
-			}
-		case pipe.AssistantMessage:
-			for _, b := range msg.Content {
-				switch cb := b.(type) {
-				case pipe.TextBlock:
-					block := NewAssistantTextBlock(m.theme, m.styles)
-					block.Append(cb.Text)
-					m.blocks = append(m.blocks, block)
-				case pipe.ThinkingBlock:
-					block := NewThinkingBlock(m.styles)
-					block.Append(cb.Thinking)
-					m.blocks = append(m.blocks, block)
-				case pipe.ToolCallBlock:
-					block := NewToolCallBlock(cb.Name, m.styles)
-					block.AppendArgs(string(cb.Arguments))
-					block.Finalize()
-					m.blocks = append(m.blocks, block)
-				}
-			}
-		case pipe.ToolResultMessage:
-			// Skip tool results in output for now.
+		if b, ok := m.activeToolCall[e.ID]; ok {
+			b.FinalizeWithCall(e.Call)
 		}
 	}
 }
 ```
 
-Replace `submitInput()` to create UserMessageBlock:
+**handleKey()** — add Tab for block toggle:
 
 ```go
-// In submitInput, replace m.output.WriteString with:
+case tea.KeyTab:
+	if !m.running && len(m.blocks) > 0 && m.blockFocus >= 0 {
+		block, cmd := m.blocks[m.blockFocus].Update(ToggleMsg{})
+		m.blocks[m.blockFocus] = block
+		m.Viewport.SetContent(m.renderContent())
+		return m, cmd
+	}
+```
+
+Focus navigation (up/down arrows when not in input) is deferred to a follow-up.
+For MVP, blockFocus defaults to the last collapsible block. Tab toggles it.
+
+**handleWindowSize()** — unchanged height calculation.
+
+**submitInput()** — creates UserMessageBlock, resets active maps:
+
+```go
 m.blocks = append(m.blocks, NewUserMessageBlock(text, m.styles))
+m.activeText = make(map[int]*AssistantTextBlock)
+m.activeThinking = make(map[int]*ThinkingBlock)
+m.activeToolCall = make(map[string]*ToolCallBlock)
 ```
 
-Replace `statusLine()` to use themed styles:
+**renderSession()** — creates blocks from session messages, including ToolResultMessage:
 
 ```go
-func (m Model) statusLine() string {
-	if m.err != nil {
-		return m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
+case pipe.ToolResultMessage:
+	content := ""
+	for _, b := range msg.Content {
+		if tb, ok := b.(pipe.TextBlock); ok {
+			content += tb.Text
+		}
 	}
-	if m.running {
-		return m.styles.Muted.Render("Generating...")
-	}
-	return m.styles.Muted.Render("Enter to send, Ctrl+C to quit")
-}
+	m.blocks = append(m.blocks, NewToolResultBlock(msg.ToolName, content, msg.IsError, m.styles))
 ```
+
+**statusLine()** — uses themed styles.
 
 **Step 4: Update all existing tests**
 
-Update `bubbletea/bubbletea_test.go` helpers and `bubbletea/model_test.go` to pass
-the theme parameter. Most tests should pass with minimal changes since they assert
-on `View()` content which still contains the same text. Key changes:
-
-- `bt.New(nopAgent, session)` → `bt.New(nopAgent, session, pipe.DefaultTheme())`
-- Remove any tests that reference `m.Viewport.Width` or `m.Viewport.Height`
-  directly (internal state) — replace with View() assertions if needed
-- The `Output` field and `SetRunning` helpers need updating for the new struct
+- All `bt.New(agent, session)` → `bt.New(agent, session, pipe.DefaultTheme())`
+- Remove `m.Viewport.Width` / `m.Viewport.Height` direct access — use `View()` assertions
+- Remove `BlockCount()` — tests use `View()` content assertions instead
+- Update `SetRunning` / `SetRunningWithCancel` for new struct (active maps initialized)
 
 **Step 5: Run all tests, then `make validate`**
 
 **Step 6: Commit**
 
 ```bash
-git add bubbletea/model.go bubbletea/bubbletea.go bubbletea/bubbletea_test.go bubbletea/model_test.go
-git commit -m "Refactor root model to tree-of-models with MessageBlock list"
+git add bubbletea/model.go bubbletea/bubbletea_test.go bubbletea/model_test.go
+git commit -m "Refactor root model to tree-of-models with Index/ID event correlation"
 ```
 
 ---
@@ -1385,20 +1557,40 @@ git commit -m "Refactor root model to tree-of-models with MessageBlock list"
 ### Task 12: Swap Input to Forked Textarea
 
 **Files:**
-- Modify: `bubbletea/model.go` — replace `textinput.Model` with `textarea.Model`
+- Modify: `bubbletea/model.go`
 
 **Step 1: Write a failing test for multi-line input**
 
 ```go
-t.Run("shift+enter inserts newline in input", func(t *testing.T) {
+t.Run("ctrl+j inserts newline in input", func(t *testing.T) {
 	t.Parallel()
 
 	m := initModel(t, nopAgent)
-	// Type "line1", press shift+enter, type "line2".
+	require.False(t, m.Running())
+
 	m.Input.SetValue("line1")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-	m = updated.(bt.Model)
-	// ... type "line2" and verify Value() contains newline.
+	// Ctrl+J is the portable newline key.
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m.Input.SetValue(m.Input.Value() + "line2")
+
+	assert.Contains(t, m.Input.Value(), "\n")
+	assert.Contains(t, m.Input.Value(), "line1")
+	assert.Contains(t, m.Input.Value(), "line2")
+})
+
+t.Run("enter sends message not newline", func(t *testing.T) {
+	t.Parallel()
+
+	session := &pipe.Session{}
+	theme := pipe.DefaultTheme()
+	m := bt.New(nopAgent, session, theme)
+	m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.Input.SetValue("hello")
+	m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Input should be cleared (message was sent).
+	assert.Empty(t, m.Input.Value())
+	assert.True(t, m.Running())
 })
 ```
 
@@ -1407,14 +1599,30 @@ t.Run("shift+enter inserts newline in input", func(t *testing.T) {
 **Step 3: Swap the input component**
 
 In `model.go`:
-- Replace `"github.com/charmbracelet/bubbles/textinput"` import with
+- Replace `"github.com/charmbracelet/bubbles/textinput"` with
   `"github.com/fwojciec/pipe/bubbletea/textarea"`
-- Change `Input textinput.Model` to `Input textarea.Model`
-- In `New()`: replace `textinput.New()` setup with `textarea.New()` setup
-- In `Init()`: return `textarea.Blink` or `nil`
-- In `handleKey()`: Enter handling checks `CheckInputComplete` callback
-- In `submitInput()`: use `m.Input.Value()` / `m.Input.Reset()`
-- In `handleWindowSize()`: use `m.Input.SetWidth(msg.Width)`
+- `Input textinput.Model` → `Input textarea.Model`
+- `New()`: `textarea.New()` setup with `MaxHeight = 3`, `SetWidth()`
+- `Init()`: return appropriate blink command or nil
+- `handleKey()`: Enter calls `Input.Value()`, trims, submits. The textarea's
+  `CheckInputComplete` is set to always return true (Enter sends).
+- `handleWindowSize()`: use `Input.SetWidth(msg.Width)`
+- Handle `textarea.InputHeightMsg`: recompute viewport height when input grows/shrinks
+
+```go
+case textarea.InputHeightMsg:
+	inputH := msg.Height
+	statusHeight := 1
+	borderHeight := 2
+	vpHeight := m.windowHeight - inputH - statusHeight - borderHeight
+	if vpHeight < 1 {
+		vpHeight = 1
+	}
+	m.Viewport.Height = vpHeight
+	return m, nil
+```
+
+Store `windowHeight int` in Model for recomputation.
 
 **Step 4: Run all tests, then `make validate`**
 
@@ -1435,7 +1643,6 @@ git commit -m "Swap input to forked textarea for multi-line support"
 **Step 1: Update the New() call to pass theme**
 
 ```go
-// In run():
 theme := pipe.DefaultTheme()
 tuiModel := bt.New(agentFn, &session, theme)
 ```
@@ -1445,17 +1652,20 @@ tuiModel := bt.New(agentFn, &session, theme)
 **Step 3: Manual smoke test**
 
 ```bash
-cd /Users/filip/code/go/pipe && go run ./cmd/pipe/
+go run ./cmd/pipe/
 ```
 
 Verify:
 - App starts, shows input
-- Can type and submit a message
+- Can type and submit a message (Enter sends)
+- Ctrl+J inserts newline in input
 - Agent responses render with markdown styling
-- Thinking blocks show collapsed
+- Thinking blocks show collapsed with `▶ Thinking`
 - Tool calls show collapsed with tool name
-- Ctrl+C quits when idle
-- Ctrl+C cancels when running
+- Tab toggles collapsible block
+- Ctrl+C quits when idle, cancels when running
+- Input auto-grows with multi-line content
+- Viewport adjusts when input height changes
 
 **Step 4: Commit**
 
@@ -1472,10 +1682,8 @@ git commit -m "Wire theme into TUI startup"
 - Modify: `bubbletea/model_test.go`
 - Modify: `bubbletea/bubbletea_test.go`
 
-This task migrates integration tests to teatest. It's optional — the direct
-Update/View testing from earlier tasks already provides good coverage. teatest
-adds value for tests that involve async behavior and full rendered output
-verification.
+Optional — direct Update/View testing from earlier tasks provides good coverage.
+teatest adds value for async and full-render verification.
 
 **Step 1: Add teatest dependency**
 
@@ -1486,7 +1694,6 @@ go get github.com/charmbracelet/x/exp/teatest
 **Step 2: Add deterministic renderer helper**
 
 ```go
-// In bubbletea_test.go:
 func trueColorRenderer() *lipgloss.Renderer {
 	r := lipgloss.NewRenderer(io.Discard)
 	r.SetColorProfile(termenv.TrueColor)
@@ -1494,9 +1701,8 @@ func trueColorRenderer() *lipgloss.Renderer {
 }
 ```
 
-Note: This requires the model to accept a renderer option. Add
-`WithRenderer(*lipgloss.Renderer)` option to `New()` if needed, or defer
-this task until the renderer option is architecturally justified.
+Note: Requires model to accept renderer option via `WithRenderer()`. Defer
+if architecturally unjustified at this stage.
 
 **Step 3: Rewrite integration test with teatest**
 
@@ -1521,16 +1727,13 @@ func TestModel_FullCycle_Teatest(t *testing.T) {
 		teatest.WithInitialTermSize(80, 24),
 	)
 
-	// Type and submit.
 	tm.Type("hi")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Wait for agent response.
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		return bytes.Contains(out, []byte("Hello!"))
 	})
 
-	// Quit.
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
@@ -1554,18 +1757,34 @@ Task 1 (Theme) ─────┬── Task 2 (Styles) ──┬── Task 4 (
                      │                      ├── Task 5 (Error)
 Task 3 (Interface) ──┤                      ├── Task 6 (Thinking)
                      │                      ├── Task 7 (ToolCall)
+                     │                      ├── Task 7b (ToolResult)
                      │                      └── Task 9 (Assistant) ── requires Task 8
                      │
                      ├── Task 8 (Markdown) ─── independent, needs goldmark
                      │
                      └── Task 10 (Textarea) ── independent
 
-Task 11 (Root Refactor) ── requires Tasks 1-9
+Task 11 (Root Refactor) ── requires Tasks 1-9, 7b
 Task 12 (Input Swap) ── requires Tasks 10, 11
 Task 13 (Wiring) ── requires Task 11
 Task 14 (teatest) ── optional, requires Task 11
 ```
 
-Tasks 4-7 can be done in any order (all depend on Tasks 1-3).
-Task 8 can be done in parallel with Tasks 4-7.
+Tasks 4-7b can be done in any order (all depend on Tasks 1-3).
+Task 8 can be done in parallel with Tasks 4-7b.
 Task 10 can be done in parallel with everything before Task 11.
+
+## Review Findings Addressed
+
+1. **Event-to-block by Index/ID** — processEvent uses `activeText[Index]`, `activeThinking[Index]`, `activeToolCall[ID]` maps instead of last-block-type.
+2. **EventToolCallEnd payload** — `FinalizeWithCall(e.Call)` applies arguments from the end event, handling Gemini's begin+end pattern.
+3. **Auto-grow layout recomputation** — textarea emits `InputHeightMsg`, root model recomputes viewport height using stored `windowHeight`.
+4. **Interactive collapse** — `ToggleMsg` in block interface, Tab key triggers toggle on focused block in root model.
+5. **Portable newline key** — Ctrl+J (maps to `\n` in all terminals). No Shift+Enter.
+6. **Tool results** — Task 7b adds `ToolResultBlock`, `renderSession()` creates them from `ToolResultMessage`.
+7. **Task 12 test complete** — full executable tests for Ctrl+J newline and Enter-sends.
+8. **Missing test coverage** — CheckInputComplete, auto-grow, and markdown wrapping tests added.
+9. **BlockCount() removed** — tests use View() content assertions.
+10. **Code blocks not reflowed** — wrapping is per-block (paragraph, list item), code blocks preserve whitespace.
+11. **File guidance corrected** — constructor changes in model.go (Task 11), not bubbletea.go.
+12. **Local paths removed** — plan uses relative paths and `go run ./cmd/pipe/`.
