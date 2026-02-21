@@ -84,7 +84,8 @@ func run() error {
 	}
 
 	// Create and run TUI.
-	tuiModel := bt.New(agentFn, &session)
+	theme := pipe.DefaultTheme()
+	tuiModel := bt.New(agentFn, &session, theme)
 
 	if err := bt.Run(ctx, tuiModel); err != nil {
 		return fmt.Errorf("TUI: %w", err)

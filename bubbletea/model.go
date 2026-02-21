@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/fwojciec/pipe"
 )
 
@@ -25,8 +24,25 @@ type Model struct {
 
 	run     AgentFunc
 	session *pipe.Session
+	theme   pipe.Theme
+	styles  Styles
 
-	output  *strings.Builder
+	blocks     []MessageBlock
+	blockFocus int // index of focused collapsible block (-1 = none)
+
+	// Active block maps for event correlation within the current turn.
+	// Text/thinking indices restart at 0 each assistant turn. Tool call
+	// IDs are globally unique and never cleared.
+	activeText     map[int]*AssistantTextBlock // keyed by EventTextDelta.Index
+	activeThinking map[int]*ThinkingBlock      // keyed by EventThinkingDelta.Index
+	activeToolCall map[string]*ToolCallBlock   // keyed by EventToolCall*.ID
+
+	// hadToolCalls is set on EventToolCallBegin. When text/thinking arrives
+	// after tool calls, it signals a new assistant turn — the text and
+	// thinking maps are cleared. This works because Anthropic and Gemini
+	// always emit tool use blocks last within an assistant message.
+	hadToolCalls bool
+
 	running bool
 	cancel  context.CancelFunc
 	eventCh chan pipe.Event
@@ -35,8 +51,8 @@ type Model struct {
 	ready   bool
 }
 
-// New creates a new TUI Model with the given agent function and session.
-func New(run AgentFunc, session *pipe.Session) Model {
+// New creates a new TUI Model with the given agent function, session, and theme.
+func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type a message..."
 	ti.Prompt = ""
@@ -44,10 +60,15 @@ func New(run AgentFunc, session *pipe.Session) Model {
 	ti.CharLimit = 0
 
 	return Model{
-		Input:   ti,
-		run:     run,
-		session: session,
-		output:  &strings.Builder{},
+		Input:          ti,
+		run:            run,
+		session:        session,
+		theme:          theme,
+		styles:         NewStyles(theme),
+		blockFocus:     -1,
+		activeText:     make(map[int]*AssistantTextBlock),
+		activeThinking: make(map[int]*ThinkingBlock),
+		activeToolCall: make(map[string]*ToolCallBlock),
 	}
 }
 
@@ -89,7 +110,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 
 	case StreamEventMsg:
-		m.processEvent(msg.Event)
+		m = m.processEvent(msg.Event)
 		m.Viewport.SetContent(m.renderContent())
 		m.Viewport.GotoBottom()
 		if m.eventCh != nil {
@@ -105,10 +126,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.err = msg.Err
 		}
+		m = m.updateBlockFocus()
 		cmd := m.Input.Focus()
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
-
 	}
 
 	// Pass remaining messages to sub-components.
@@ -159,7 +180,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 
 	if !m.ready {
 		m.Viewport = viewport.New(msg.Width, vpHeight)
-		m.renderSession()
+		m = m.renderSession()
 		m.Viewport.SetContent(m.renderContent())
 		m.Viewport.GotoBottom()
 		m.ready = true
@@ -192,6 +213,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.submitInput(text)
+
+	case tea.KeyTab:
+		if !m.running && m.blockFocus >= 0 {
+			block, cmd := m.blocks[m.blockFocus].Update(ToggleMsg{})
+			m.blocks[m.blockFocus] = block
+			m.Viewport.SetContent(m.renderContent())
+			return m, cmd
+		}
+		return m, nil
+
+	case tea.KeyShiftTab:
+		if !m.running {
+			m = m.cycleFocusPrev()
+			m.Viewport.SetContent(m.renderContent())
+		}
+		return m, nil
 	}
 
 	// When idle, pass keys to both textarea (for typing) and viewport
@@ -226,10 +263,16 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	}
 	m.session.Messages = append(m.session.Messages, userMsg)
 
-	// Show user message in output.
-	m.output.WriteString("\n> " + text + "\n\n")
+	// Add user message block.
+	m.blocks = append(m.blocks, NewUserMessageBlock(text, m.styles))
 	m.Viewport.SetContent(m.renderContent())
 	m.Viewport.GotoBottom()
+
+	// Reset active maps for new conversation turn.
+	m.activeText = make(map[int]*AssistantTextBlock)
+	m.activeThinking = make(map[int]*ThinkingBlock)
+	m.activeToolCall = make(map[string]*ToolCallBlock)
+	m.hadToolCalls = false
 
 	// Set up channels and context for agent run.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -246,62 +289,150 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	)
 }
 
-// renderSession writes existing session messages to the output buffer.
-func (m Model) renderSession() {
+// renderSession creates blocks from existing session messages.
+func (m Model) renderSession() Model {
 	for _, msg := range m.session.Messages {
 		switch msg := msg.(type) {
 		case pipe.UserMessage:
 			for _, b := range msg.Content {
 				if tb, ok := b.(pipe.TextBlock); ok {
-					m.output.WriteString("\n> " + tb.Text + "\n\n")
+					m.blocks = append(m.blocks, NewUserMessageBlock(tb.Text, m.styles))
 				}
 			}
 		case pipe.AssistantMessage:
 			for _, b := range msg.Content {
 				switch cb := b.(type) {
 				case pipe.TextBlock:
-					m.output.WriteString(cb.Text)
+					block := NewAssistantTextBlock(m.theme, m.styles)
+					block.Append(cb.Text)
+					m.blocks = append(m.blocks, block)
+				case pipe.ThinkingBlock:
+					block := NewThinkingBlock(m.styles)
+					block.Append(cb.Thinking)
+					m.blocks = append(m.blocks, block)
 				case pipe.ToolCallBlock:
-					fmt.Fprintf(m.output, "\n--- tool: %s ---\n--- end ---\n\n", cb.Name)
+					block := NewToolCallBlock(cb.Name, cb.ID, m.styles)
+					block.FinalizeWithCall(cb)
+					m.blocks = append(m.blocks, block)
 				}
 			}
 		case pipe.ToolResultMessage:
-			// Skip tool results in output for now.
+			var content strings.Builder
+			for _, b := range msg.Content {
+				if tb, ok := b.(pipe.TextBlock); ok {
+					content.WriteString(tb.Text)
+				}
+			}
+			m.blocks = append(m.blocks, NewToolResultBlock(msg.ToolName, content.String(), msg.IsError, m.styles))
 		}
 	}
+	return m
 }
 
 func (m Model) renderContent() string {
-	return lipgloss.NewStyle().Width(m.Viewport.Width).Render(m.output.String())
+	if len(m.blocks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, block := range m.blocks {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(block.View(m.Viewport.Width))
+	}
+	return b.String()
 }
 
-func (m Model) processEvent(evt pipe.Event) {
+// processEvent routes a streaming event to the appropriate block.
+func (m Model) processEvent(evt pipe.Event) Model {
 	switch e := evt.(type) {
 	case pipe.EventTextDelta:
-		m.output.WriteString(e.Delta)
+		if m.hadToolCalls {
+			m.activeText = make(map[int]*AssistantTextBlock)
+			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.hadToolCalls = false
+		}
+		if b, ok := m.activeText[e.Index]; ok {
+			b.Append(e.Delta)
+		} else {
+			b := NewAssistantTextBlock(m.theme, m.styles)
+			b.Append(e.Delta)
+			m.blocks = append(m.blocks, b)
+			m.activeText[e.Index] = b
+			m = m.updateBlockFocus()
+		}
 	case pipe.EventThinkingDelta:
-		// Show thinking inline for MVP.
-		m.output.WriteString(e.Delta)
+		if m.hadToolCalls {
+			m.activeText = make(map[int]*AssistantTextBlock)
+			m.activeThinking = make(map[int]*ThinkingBlock)
+			m.hadToolCalls = false
+		}
+		if b, ok := m.activeThinking[e.Index]; ok {
+			b.Append(e.Delta)
+		} else {
+			b := NewThinkingBlock(m.styles)
+			b.Append(e.Delta)
+			m.blocks = append(m.blocks, b)
+			m.activeThinking[e.Index] = b
+			m = m.updateBlockFocus()
+		}
 	case pipe.EventToolCallBegin:
-		fmt.Fprintf(m.output, "\n--- tool: %s ---\n", e.Name)
+		m.hadToolCalls = true
+		b := NewToolCallBlock(e.Name, e.ID, m.styles)
+		m.blocks = append(m.blocks, b)
+		m.activeToolCall[e.ID] = b
+		m = m.updateBlockFocus()
 	case pipe.EventToolCallDelta:
-		// Skip partial JSON arguments.
+		if b, ok := m.activeToolCall[e.ID]; ok {
+			b.AppendArgs(e.Delta)
+		}
 	case pipe.EventToolCallEnd:
-		m.output.WriteString("--- end ---\n\n")
+		if b, ok := m.activeToolCall[e.Call.ID]; ok {
+			b.FinalizeWithCall(e.Call)
+		}
 	}
+	return m
+}
+
+// updateBlockFocus scans backwards to find the last collapsible block.
+func (m Model) updateBlockFocus() Model {
+	m.blockFocus = -1
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		switch m.blocks[i].(type) {
+		case *ThinkingBlock, *ToolCallBlock:
+			m.blockFocus = i
+			return m
+		}
+	}
+	return m
+}
+
+// cycleFocusPrev moves blockFocus to the previous collapsible block, wrapping around.
+func (m Model) cycleFocusPrev() Model {
+	start := m.blockFocus - 1
+	if start < 0 {
+		start = len(m.blocks) - 1
+	}
+	for i := range len(m.blocks) {
+		idx := (start - i + len(m.blocks)) % len(m.blocks)
+		switch m.blocks[idx].(type) {
+		case *ThinkingBlock, *ToolCallBlock:
+			m.blockFocus = idx
+			return m
+		}
+	}
+	m.blockFocus = -1
+	return m
 }
 
 func (m Model) statusLine() string {
-	style := lipgloss.NewStyle().Faint(true)
-
 	if m.err != nil {
-		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-		return errStyle.Render(fmt.Sprintf("Error: %v", m.err))
+		return m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
 	}
 	if m.running {
-		return style.Render("Generating...")
+		return m.styles.Muted.Render("Generating...")
 	}
-	return style.Render("Enter to send, Ctrl+C to quit")
+	return m.styles.Muted.Render("Enter to send, Ctrl+C to quit")
 }
 
 // startAgent runs the agent loop in a goroutine and signals completion.
