@@ -193,6 +193,7 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 	} else {
 		m.Viewport.Width = msg.Width
 		m.Viewport.Height = vpHeight
+		m.Viewport.SetContent(m.renderContent())
 	}
 
 	m.Input.SetWidth(msg.Width)

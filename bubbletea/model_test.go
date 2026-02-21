@@ -68,6 +68,36 @@ func TestModel_Update(t *testing.T) {
 		assert.NotEmpty(t, view)
 	})
 
+	t.Run("window size resize re-renders viewport content", func(t *testing.T) {
+		t.Parallel()
+
+		// Start with a narrow viewport so word-wrapping is visible.
+		m := initModelWithSize(t, nopAgent, 30, 20)
+
+		// Add content that wraps at 30 columns.
+		longLine := "word1 word2 word3 word4 word5 word6 word7 word8"
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: longLine}})
+
+		// Widen the viewport. Content should be re-rendered at new width.
+		m = updateModel(t, m, tea.WindowSizeMsg{Width: 120, Height: 20})
+
+		// At 120 columns the entire line fits on one row. If content was
+		// not re-rendered, the old 30-column wrapping would split the text
+		// across multiple lines and "word8" wouldn't appear on the same
+		// line as "word1".
+		viewportContent := m.Viewport.View()
+		lines := strings.Split(viewportContent, "\n")
+		// Find the line containing word1 — word8 should be on that same line.
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, "word1") && strings.Contains(line, "word8") {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected word1 and word8 on the same line after resize, got:\n%s", viewportContent)
+	})
+
 	t.Run("ctrl+c when idle quits", func(t *testing.T) {
 		t.Parallel()
 
