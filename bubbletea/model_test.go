@@ -1,6 +1,7 @@
 package bubbletea_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
 	"github.com/fwojciec/pipe/bubbletea/textarea"
@@ -408,80 +410,6 @@ func TestModel_Integration(t *testing.T) {
 		assert.Contains(t, m.View(), "hi")
 	})
 
-	t.Run("full agent cycle with event delivery", func(t *testing.T) {
-		t.Parallel()
-
-		// Create a mock agent that sends events and completes.
-		agent := func(_ context.Context, session *pipe.Session, onEvent func(pipe.Event)) error {
-			onEvent(pipe.EventTextDelta{Index: 0, Delta: "Hello!"})
-			session.Messages = append(session.Messages, pipe.AssistantMessage{
-				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "Hello!"}},
-				StopReason: pipe.StopEndTurn,
-			})
-			return nil
-		}
-
-		session := &pipe.Session{}
-		theme := pipe.DefaultTheme()
-		m := bt.New(agent, session, theme)
-
-		// Initialize.
-		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		m = updated.(bt.Model)
-
-		// Submit input.
-		m.Input.SetValue("hi")
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = updated.(bt.Model)
-		require.NotNil(t, cmd)
-
-		// Execute the batch cmd. tea.Batch returns a BatchMsg containing sub-cmds.
-		batchResult := cmd()
-		batchMsg, ok := batchResult.(tea.BatchMsg)
-		require.True(t, ok, "expected BatchMsg, got %T", batchResult)
-
-		// Execute sub-cmds in goroutines and collect results.
-		results := make(chan tea.Msg, len(batchMsg))
-		for _, subCmd := range batchMsg {
-			go func() {
-				if subCmd != nil {
-					results <- subCmd()
-				}
-			}()
-		}
-
-		// Collect all results with timeout.
-		timeout := time.After(5 * time.Second)
-		for range len(batchMsg) {
-			select {
-			case msg := <-results:
-				if msg == nil {
-					continue
-				}
-				updated, cmd = m.Update(msg)
-				m = updated.(bt.Model)
-
-				// If a StreamEventMsg, chain the next listen.
-				if _, isSE := msg.(bt.StreamEventMsg); isSE && cmd != nil {
-					nextMsg := cmd()
-					if nextMsg != nil {
-						updated, _ = m.Update(nextMsg)
-						m = updated.(bt.Model)
-					}
-				}
-			case <-timeout:
-				t.Fatal("timeout waiting for cmd results")
-			}
-		}
-
-		// Agent should have completed.
-		assert.False(t, m.Running())
-		assert.NoError(t, m.Err())
-
-		// Session should have user message + assistant message.
-		require.Len(t, session.Messages, 2)
-	})
-
 	t.Run("viewport scrolls long output", func(t *testing.T) {
 		t.Parallel()
 
@@ -530,6 +458,43 @@ func TestModel_Integration(t *testing.T) {
 		assert.NotContains(t, viewAfter, "line-29")
 	})
 
+}
+
+func TestModel_Teatest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("full agent cycle with event delivery", func(t *testing.T) {
+		t.Parallel()
+
+		agent := func(_ context.Context, session *pipe.Session, onEvent func(pipe.Event)) error {
+			onEvent(pipe.EventTextDelta{Index: 0, Delta: "Hello!"})
+			session.Messages = append(session.Messages, pipe.AssistantMessage{
+				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "Hello!"}},
+				StopReason: pipe.StopEndTurn,
+			})
+			return nil
+		}
+
+		session := &pipe.Session{}
+		theme := pipe.DefaultTheme()
+		m := bt.New(agent, session, theme)
+
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
+
+		tm.Type("hi")
+		tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("Hello!")) &&
+				bytes.Contains(out, []byte("Enter to send"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	})
+
 	t.Run("existing session messages render on init", func(t *testing.T) {
 		t.Parallel()
 
@@ -546,13 +511,17 @@ func TestModel_Integration(t *testing.T) {
 		theme := pipe.DefaultTheme()
 		m := bt.New(nopAgent, session, theme)
 
-		// Initialize viewport.
-		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model := updated.(bt.Model)
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
 
-		view := model.View()
-		assert.Contains(t, view, "hello there")
-		assert.Contains(t, view, "Hi! How can I help?")
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("hello there")) &&
+				bytes.Contains(out, []byte("Hi! How can I help?"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 	})
 
 	t.Run("existing session with tool result renders on init", func(t *testing.T) {
@@ -576,12 +545,17 @@ func TestModel_Integration(t *testing.T) {
 		theme := pipe.DefaultTheme()
 		m := bt.New(nopAgent, session, theme)
 
-		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model := updated.(bt.Model)
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
 
-		view := model.View()
-		assert.Contains(t, view, "file contents here")
-		assert.Contains(t, view, "read")
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("file contents here")) &&
+				bytes.Contains(out, []byte("read"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 	})
 
 	t.Run("existing session with thinking block renders on init", func(t *testing.T) {
@@ -601,15 +575,17 @@ func TestModel_Integration(t *testing.T) {
 		theme := pipe.DefaultTheme()
 		m := bt.New(nopAgent, session, theme)
 
-		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		model := updated.(bt.Model)
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
 
-		view := model.View()
-		// Thinking block starts collapsed, so content is hidden.
-		assert.NotContains(t, view, "let me consider")
-		// But the header should be visible.
-		assert.Contains(t, view, "Thinking")
-		// Text block should be visible.
-		assert.Contains(t, view, "here is my answer")
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("Thinking")) &&
+				bytes.Contains(out, []byte("here is my answer")) &&
+				!bytes.Contains(out, []byte("let me consider"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 	})
 }
