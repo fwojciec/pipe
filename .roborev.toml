@@ -1,5 +1,13 @@
 review_guidelines = """
-This project strictly follows Ben Johnson's Standard Package Layout.
-Use /go-standard-package-layout for the full architectural rules.
-Flag any violations of the pattern.
+This project follows Ben Johnson's Standard Package Layout.
+If available, use /go-standard-package-layout for the full rules.
+
+Architectural checks:
+- Root package (pipe) is the domain core — types, interfaces, and pure logic with no external imports (stdlib only)
+- Subpackages are named after their primary dependency (anthropic/, bubbletea/, exec/, fs/, json/), not concepts
+- Files within packages are named after the domain entity they implement, not generic names (repository.go, helpers.go)
+- Interface compliance is verified at compile time: var _ pipe.Foo = (*Foo)(nil)
+- mock/ package uses function-field mocks, no mocking frameworks
+- cmd/pipe/ is the composition root — wires dependencies, contains no business logic
+- Dependencies flow toward the domain: subpackages import root, never each other
 """
