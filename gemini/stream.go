@@ -210,6 +210,14 @@ func (s *stream) processPart(part *genai.Part) error {
 	switch {
 	case part.FunctionCall != nil:
 		s.hasToolCall = true
+
+		// Gemini may send ThoughtSignature on the FunctionCall part rather
+		// than (or in addition to) the thinking part. Backfill it onto the
+		// preceding ThinkingBlock so it's available for replay.
+		if len(part.ThoughtSignature) > 0 {
+			s.backfillThinkingSignature(part.ThoughtSignature)
+		}
+
 		args := part.FunctionCall.Args
 		if args == nil {
 			args = map[string]any{}
@@ -276,6 +284,25 @@ func (s *stream) currentBlockIndex(blockType string) int {
 		s.msg.Content = append(s.msg.Content, pipe.TextBlock{})
 	}
 	return idx
+}
+
+// backfillThinkingSignature finds the last thinking block and sets its signature
+// if it doesn't already have one. Gemini sometimes sends the ThoughtSignature on
+// the FunctionCall part rather than on a thinking part.
+func (s *stream) backfillThinkingSignature(sig []byte) {
+	for i := len(s.blocks) - 1; i >= 0; i-- {
+		if s.blocks[i].blockType == "thinking" {
+			bs := s.blocks[i]
+			if len(bs.signature) == 0 {
+				bs.signature = slices.Clone(sig)
+				s.msg.Content[i] = pipe.ThinkingBlock{
+					Thinking:  bs.textBuf.String(),
+					Signature: slices.Clone(sig),
+				}
+			}
+			return
+		}
+	}
 }
 
 func mapFinishReason(reason genai.FinishReason) pipe.StopReason {

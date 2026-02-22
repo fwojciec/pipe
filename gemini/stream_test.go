@@ -224,6 +224,54 @@ func TestStream_MultiPartChunk(t *testing.T) {
 	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
 }
 
+func TestStream_FunctionCallThoughtSignatureBackfillsThinking(t *testing.T) {
+	t.Parallel()
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{Text: "reasoning", Thought: true},
+					{
+						FunctionCall: &genai.FunctionCall{
+							ID:   "tc_1",
+							Name: "read",
+							Args: map[string]any{"path": "a.go"},
+						},
+						ThoughtSignature: []byte("sig-from-call"),
+					},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 8,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks))
+	events := collectStreamEvents(t, s)
+
+	require.Len(t, events, 3)
+	assert.Equal(t, pipe.EventThinkingDelta{Index: 0, Delta: "reasoning"}, events[0])
+	assert.IsType(t, pipe.EventToolCallBegin{}, events[1])
+	assert.IsType(t, pipe.EventToolCallEnd{}, events[2])
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 2)
+	assert.Equal(t, pipe.ThinkingBlock{
+		Thinking:  "reasoning",
+		Signature: []byte("sig-from-call"),
+	}, msg.Content[0])
+	assert.Equal(t, pipe.ToolCallBlock{
+		ID:        "tc_1",
+		Name:      "read",
+		Arguments: json.RawMessage(`{"path":"a.go"}`),
+	}, msg.Content[1])
+	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
+}
+
 func TestStream_InterleavedThinkTextThink(t *testing.T) {
 	t.Parallel()
 	// Interleaved think/text/think produces 3 blocks, not 2.
