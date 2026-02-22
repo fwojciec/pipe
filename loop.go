@@ -150,7 +150,7 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 			// If no text blocks exist, the event is skipped entirely.
 			var sb strings.Builder
 			for _, b := range result.Content {
-				if tb, ok := b.(TextBlock); ok {
+				if tb, ok := b.(TextBlock); ok && tb.Text != "" {
 					if sb.Len() > 0 {
 						sb.WriteByte('\n')
 					}
