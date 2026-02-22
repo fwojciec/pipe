@@ -518,6 +518,71 @@ func TestModel_SessionReloadBlockFocus(t *testing.T) {
 	})
 }
 
+func TestModel_MouseToggle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mouse enabled by default", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		assert.True(t, m.MouseEnabled())
+	})
+
+	t.Run("alt+m toggles mouse off", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		assert.False(t, m.MouseEnabled())
+	})
+
+	t.Run("alt+m twice toggles mouse back on", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		assert.True(t, m.MouseEnabled())
+	})
+
+	t.Run("alt+m returns disable then enable commands", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+
+		// First toggle: disable mouse.
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		m = updated.(bt.Model)
+		require.NotNil(t, cmd)
+		disableMsg := cmd()
+		disableType := fmt.Sprintf("%T", disableMsg)
+
+		// Second toggle: re-enable mouse.
+		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		require.NotNil(t, cmd)
+		enableMsg := cmd()
+		enableType := fmt.Sprintf("%T", enableMsg)
+
+		// The two commands should produce different message types.
+		assert.NotEqual(t, disableType, enableType)
+	})
+
+	t.Run("alt+m during agent run is ignored", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m, _ = bt.SetRunning(m)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		// Mouse should still be enabled — toggle was ignored.
+		assert.True(t, m.MouseEnabled())
+	})
+
+	t.Run("status line shows mouse hint when disabled", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Default state: no mouse hint.
+		assert.NotContains(t, m.View(), "Alt+M")
+		// Disable mouse: hint appears.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		assert.Contains(t, m.View(), "Alt+M")
+	})
+}
+
 func TestModel_InputHeightResetOnSubmit(t *testing.T) {
 	t.Parallel()
 
