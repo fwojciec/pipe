@@ -691,6 +691,59 @@ func TestLoop_Run(t *testing.T) {
 		assert.Equal(t, "first\nsecond", toolResults[0].Content)
 	})
 
+	t.Run("event handler skips EventToolResult when content has no text blocks", func(t *testing.T) {
+		t.Parallel()
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "done"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					return completedStream(toolCallMsg), nil
+				}
+				return completedStream(textMsg), nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return &pipe.ToolResult{
+					Content: []pipe.ContentBlock{
+						pipe.ImageBlock{Data: []byte{0x89}, MimeType: "image/png"},
+					},
+				}, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := pipe.NewLoop(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		for _, e := range received {
+			if _, ok := e.(pipe.EventToolResult); ok {
+				t.Fatal("expected no EventToolResult for non-text content")
+			}
+		}
+	})
+
 	t.Run("event handler receives EventToolResult with error", func(t *testing.T) {
 		t.Parallel()
 
