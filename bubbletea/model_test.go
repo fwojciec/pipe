@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
@@ -184,6 +185,25 @@ func TestModel_Update(t *testing.T) {
 		assert.False(t, model.Running())
 		assert.Error(t, model.Err())
 		assert.Contains(t, model.View(), "Error")
+	})
+
+	t.Run("agent done with long error wraps to viewport width", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModelWithSize(t, nopAgent, 40, 20)
+		m, _ = bt.SetRunning(m)
+
+		longErr := fmt.Errorf("this is a very long error message that should wrap within the viewport width limit")
+		updated, _ := m.Update(bt.AgentDoneMsg{Err: longErr})
+		model := updated.(bt.Model)
+
+		view := model.View()
+		// The full error text must be visible (wrapped, not truncated).
+		assert.Contains(t, view, "width limit")
+		// No line should visually exceed the viewport width.
+		for _, line := range strings.Split(view, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(line), 40, "line exceeds viewport width: %q", line)
+		}
 	})
 
 	t.Run("agent done with context canceled is not an error", func(t *testing.T) {
