@@ -1,13 +1,10 @@
 package bubbletea
 
-import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
 var _ MessageBlock = (*UserMessageBlock)(nil)
 
-// UserMessageBlock renders a user message with a "> " prefix.
+// UserMessageBlock renders a user message with a background tint.
 type UserMessageBlock struct {
 	text   string
 	styles Styles
@@ -23,6 +20,9 @@ func (b *UserMessageBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 }
 
 func (b *UserMessageBlock) View(width int) string {
-	content := b.styles.UserMsg.Render("> ") + b.text
-	return lipgloss.NewStyle().Width(width).Render(content)
+	content := b.styles.UserMsg.Render(b.text)
+	return b.styles.UserBg.
+		Width(width).
+		PaddingLeft(1).
+		Render(content)
 }
