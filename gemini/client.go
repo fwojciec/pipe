@@ -171,6 +171,8 @@ func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 			if bl.Signature != nil {
 				p.ThoughtSignature = bl.Signature
 				lastSig = bl.Signature
+			} else {
+				lastSig = nil
 			}
 			parts = append(parts, p)
 		case pipe.ToolCallBlock:

@@ -77,6 +77,39 @@ func TestConvertMessages_ThinkingSignaturePropagatedToToolCall(t *testing.T) {
 	assert.Equal(t, sig, got[0].Parts[1].ThoughtSignature)
 }
 
+func TestConvertMessages_ToolCallWithoutThinking(t *testing.T) {
+	t.Parallel()
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Parts, 1)
+	require.NotNil(t, got[0].Parts[0].FunctionCall)
+	assert.Nil(t, got[0].Parts[0].ThoughtSignature)
+}
+
+func TestConvertMessages_ThinkingSignaturePropagatedToMultipleToolCalls(t *testing.T) {
+	t.Parallel()
+	sig := []byte("thought-sig-data")
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "reasoning", Signature: sig},
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
+			pipe.ToolCallBlock{ID: "call_2", Name: "read", Arguments: json.RawMessage(`{"path":"foo.go"}`)},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Parts, 3)
+	assert.Equal(t, sig, got[0].Parts[1].ThoughtSignature)
+	assert.Equal(t, sig, got[0].Parts[2].ThoughtSignature)
+}
+
 func TestConvertMessages_ToolCallAndResult(t *testing.T) {
 	t.Parallel()
 	msgs := []pipe.Message{
