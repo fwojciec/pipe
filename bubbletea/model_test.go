@@ -595,6 +595,105 @@ func TestModel_MouseToggle(t *testing.T) {
 	})
 }
 
+func TestModel_MouseEscapeFilter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mouse message does not reach input", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.MouseMsg{
+			Button: tea.MouseButtonWheelDown,
+			Action: tea.MouseActionPress,
+			X:      10, Y: 5,
+		})
+		assert.Empty(t, m.Input.Value())
+	})
+
+	t.Run("SGR mouse body fragment does not reach input", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Simulates the body of a split SGR mouse sequence: <64;56;37M
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<64;56;37M"),
+		})
+		assert.Empty(t, m.Input.Value())
+	})
+
+	t.Run("SGR mouse release fragment does not reach input", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// SGR release events end with lowercase 'm'.
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<35;10;20m"),
+		})
+		assert.Empty(t, m.Input.Value())
+	})
+
+	t.Run("normal text still reaches input", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m.Input = typeInputString(t, m.Input, "hello")
+		assert.Equal(t, "hello", m.Input.Value())
+	})
+
+	t.Run("too few semicolons is not a mouse fragment", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<64;56M"),
+		})
+		assert.Equal(t, "<64;56M", m.Input.Value())
+	})
+
+	t.Run("too many semicolons is not a mouse fragment", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<1;2;3;4M"),
+		})
+		assert.Equal(t, "<1;2;3;4M", m.Input.Value())
+	})
+
+	t.Run("non-digit middle chars are not a mouse fragment", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<a;b;cM"),
+		})
+		assert.Equal(t, "<a;b;cM", m.Input.Value())
+	})
+
+	t.Run("minimum valid mouse fragment is filtered", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<0;0;0M"),
+		})
+		assert.Empty(t, m.Input.Value())
+	})
+
+	t.Run("mouse fragment ignored only when mouse enabled", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Disable mouse.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		require.False(t, m.MouseEnabled())
+		// SGR fragment should pass through when mouse is disabled since
+		// the terminal is not sending mouse events in that mode.
+		m = updateModel(t, m, tea.KeyMsg{
+			Type:  tea.KeyRunes,
+			Runes: []rune("<64;56;37M"),
+		})
+		assert.Equal(t, "<64;56;37M", m.Input.Value())
+	})
+}
+
 func TestModel_InputHeightResetOnSubmit(t *testing.T) {
 	t.Parallel()
 

@@ -149,10 +149,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.Input.Focus()
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
+
+	case tea.MouseMsg:
+		// Route mouse events to viewport only. The input component does not
+		// need mouse events, and passing them through could cause issues.
+		var cmd tea.Cmd
+		m.Viewport, cmd = m.Viewport.Update(msg)
+		return m, cmd
 	}
 
 	// Pass remaining messages to sub-components.
-	// Viewport always receives messages for scrolling (keyboard and mouse).
 	var cmd tea.Cmd
 	m.Viewport, cmd = m.Viewport.Update(msg)
 	cmds = append(cmds, cmd)
@@ -261,6 +267,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// (for scrolling). Only forward non-character keys to viewport to avoid
 	// conflicts (e.g. 'j'/'k' are viewport scroll AND text characters).
 	if !m.running {
+		// Discard SGR mouse escape sequence fragments that leak through
+		// when Bubble Tea's input parser splits a mouse sequence across
+		// read buffer boundaries. The body looks like <64;56;37M.
+		if m.mouseEnabled && msg.Type == tea.KeyRunes && !msg.Paste && isMouseSGRFragment(msg.Runes) {
+			return m, nil
+		}
+
 		// Alt+M toggles mouse capture for native text selection.
 		if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 && msg.Runes[0] == 'm' {
 			m.mouseEnabled = !m.mouseEnabled
@@ -517,4 +530,30 @@ func listenForEvent(ch <-chan pipe.Event, doneCh <-chan error) tea.Cmd {
 		}
 		return StreamEventMsg{Event: evt}
 	}
+}
+
+// isMouseSGRFragment returns true if runes match the body of a split SGR
+// mouse escape sequence: <button;col;row(M|m). When Bubble Tea's input
+// reader splits an SGR sequence across buffer boundaries, the \x1b[ prefix
+// is consumed and the remaining <digits;digits;digits[Mm] arrives as a
+// regular KeyRunes message.
+func isMouseSGRFragment(runes []rune) bool {
+	n := len(runes)
+	if n < 7 || runes[0] != '<' {
+		return false
+	}
+	last := runes[n-1]
+	if last != 'M' && last != 'm' {
+		return false
+	}
+	// Middle characters must be digits or semicolons, with at least two semicolons.
+	semis := 0
+	for _, r := range runes[1 : n-1] {
+		if r == ';' {
+			semis++
+		} else if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return semis == 2
 }
