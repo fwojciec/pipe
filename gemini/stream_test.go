@@ -268,6 +268,7 @@ func TestStream_FunctionCallThoughtSignatureBackfillsThinking(t *testing.T) {
 		ID:        "tc_1",
 		Name:      "read",
 		Arguments: json.RawMessage(`{"path":"a.go"}`),
+		Signature: []byte("sig-from-call"),
 	}, msg.Content[1])
 	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
 }
@@ -310,6 +311,7 @@ func TestStream_FunctionCallThoughtSignatureNoPrecedingThinkingBlock(t *testing.
 		ID:        "tc_1",
 		Name:      "read",
 		Arguments: json.RawMessage(`{"path":"a.go"}`),
+		Signature: []byte("sig-orphan"),
 	}, msg.Content[0])
 }
 
