@@ -634,6 +634,63 @@ func TestLoop_Run(t *testing.T) {
 		assert.False(t, toolResults[0].IsError)
 	})
 
+	t.Run("event handler joins multiple text blocks with newline", func(t *testing.T) {
+		t.Parallel()
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "done"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					return completedStream(toolCallMsg), nil
+				}
+				return completedStream(textMsg), nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, _ string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return &pipe.ToolResult{
+					Content: []pipe.ContentBlock{
+						pipe.TextBlock{Text: "first"},
+						pipe.TextBlock{Text: "second"},
+					},
+				}, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := pipe.NewLoop(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		var toolResults []pipe.EventToolResult
+		for _, e := range received {
+			if tr, ok := e.(pipe.EventToolResult); ok {
+				toolResults = append(toolResults, tr)
+			}
+		}
+		require.Len(t, toolResults, 1)
+		assert.Equal(t, "first\nsecond", toolResults[0].Content)
+	})
+
 	t.Run("event handler receives EventToolResult with error", func(t *testing.T) {
 		t.Parallel()
 
