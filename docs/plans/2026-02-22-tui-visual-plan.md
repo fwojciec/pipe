@@ -1065,10 +1065,12 @@ func TestBlockSeparator(t *testing.T) {
 **Step 3: Write integration test bridging separator logic to renderContent**
 
 Expose `renderContent` via `export_test.go` and compare two scenarios:
-tool-only blocks with multiple tools (no `\n\n`) vs mixed blocks (has `\n\n`).
-Both use short, single-line content so internal `\n\n` from block renderers
-is impossible. The tool-only test uses two adjacent tools to exercise the
-tool→tool separator path through `renderContent`.
+tool-only blocks with multiple tools (no `\n\n`) vs mixed blocks (exactly one
+`\n\n`). Both use short, single-line content so internal `\n\n` from block
+renderers is impossible. The tool-only test uses two adjacent tools to exercise
+the tool→tool separator path through `renderContent`. The boundary test asserts
+`strings.Count == 1` to ensure the blank line appears only at the expected
+text→tool boundary.
 
 Add to `bubbletea/export_test.go`:
 
@@ -1094,6 +1096,7 @@ func TestModel_BlockSpacing(t *testing.T) {
 		raw := m.RenderContent()
 		// Content must be single-line and renderers must produce compact output
 		// for this assertion to hold.
+		require.NotContains(t, "ok", "\n\n", "test data must be single-line")
 		assert.NotContains(t, raw, "\n\n",
 			"tool cluster should have no blank lines, got:\n%s", raw)
 	})
@@ -1107,8 +1110,8 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
 
 		raw := m.RenderContent()
-		assert.Contains(t, raw, "\n\n",
-			"text→tool boundary should have blank line, got:\n%s", raw)
+		assert.Equal(t, 1, strings.Count(raw, "\n\n"),
+			"expected exactly one blank line at text→tool boundary, got:\n%s", raw)
 	})
 }
 ```
