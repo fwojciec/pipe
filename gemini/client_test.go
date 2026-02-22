@@ -57,6 +57,26 @@ func TestConvertMessages_ThinkingWithSignature(t *testing.T) {
 	assert.Equal(t, "Answer", got[0].Parts[1].Text)
 }
 
+func TestConvertMessages_ThinkingSignaturePropagatedToToolCall(t *testing.T) {
+	t.Parallel()
+	sig := []byte("thought-sig-data")
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "reasoning", Signature: sig},
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Parts, 2)
+	// Thinking part has signature.
+	assert.Equal(t, sig, got[0].Parts[0].ThoughtSignature)
+	// Tool call part must also carry the signature.
+	require.NotNil(t, got[0].Parts[1].FunctionCall)
+	assert.Equal(t, sig, got[0].Parts[1].ThoughtSignature)
+}
+
 func TestConvertMessages_ToolCallAndResult(t *testing.T) {
 	t.Parallel()
 	msgs := []pipe.Message{

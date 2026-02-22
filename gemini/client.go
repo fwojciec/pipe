@@ -159,6 +159,9 @@ func ConvertMessages(msgs []pipe.Message) ([]*genai.Content, error) {
 
 func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 	var parts []*genai.Part
+	// Gemini requires ThoughtSignature on FunctionCall parts that follow
+	// thinking. Track the last signature so tool calls can include it.
+	var lastSig []byte
 	for _, b := range blocks {
 		switch bl := b.(type) {
 		case pipe.TextBlock:
@@ -167,6 +170,7 @@ func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 			p := &genai.Part{Text: bl.Thinking, Thought: true}
 			if bl.Signature != nil {
 				p.ThoughtSignature = bl.Signature
+				lastSig = bl.Signature
 			}
 			parts = append(parts, p)
 		case pipe.ToolCallBlock:
@@ -174,13 +178,17 @@ func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 			if err := json.Unmarshal(bl.Arguments, &args); err != nil {
 				return nil, fmt.Errorf("invalid tool call arguments JSON: %w", err)
 			}
-			parts = append(parts, &genai.Part{
+			p := &genai.Part{
 				FunctionCall: &genai.FunctionCall{
 					ID:   bl.ID,
 					Name: bl.Name,
 					Args: args,
 				},
-			})
+			}
+			if lastSig != nil {
+				p.ThoughtSignature = lastSig
+			}
+			parts = append(parts, p)
 		case pipe.ImageBlock:
 			parts = append(parts, &genai.Part{
 				InlineData: &genai.Blob{
