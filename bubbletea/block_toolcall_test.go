@@ -2,8 +2,11 @@ package bubbletea_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
 	"github.com/stretchr/testify/assert"
@@ -96,5 +99,43 @@ func TestToolCallBlock_View(t *testing.T) {
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewToolCallBlock("read", "tc-42", styles)
 		assert.Equal(t, "tc-42", block.ID())
+	})
+
+	t.Run("pads collapsed view to full width", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
+		view := block.View(40)
+		for _, line := range strings.Split(view, "\n") {
+			if line == "" {
+				continue
+			}
+			assert.Equal(t, 40, lipgloss.Width(line))
+		}
+	})
+
+	t.Run("pads expanded view to full width", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
+		block.AppendArgs(`{"path": "/tmp/foo"}`)
+		updated, _ := block.Update(bt.ToggleMsg{})
+		view := updated.(*bt.ToolCallBlock).View(40)
+		for _, line := range strings.Split(view, "\n") {
+			if line == "" {
+				continue
+			}
+			assert.Equal(t, 40, lipgloss.Width(line))
+		}
+	})
+
+	t.Run("has 1-space left padding", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolCallBlock("read", "tc-1", styles)
+		view := block.View(80)
+		firstLine := strings.SplitN(view, "\n", 2)[0]
+		stripped := ansi.Strip(firstLine)
+		assert.True(t, strings.HasPrefix(stripped, " "), "expected leading space, got: %q", stripped)
 	})
 }

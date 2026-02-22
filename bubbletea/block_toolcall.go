@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/fwojciec/pipe"
 )
 
@@ -54,9 +53,11 @@ func (b *ToolCallBlock) View(width int) string {
 		indicator = "▼"
 	}
 	header := b.styles.ToolCall.Render(indicator + " " + b.name)
-	if b.collapsed || b.args.Len() == 0 {
-		return lipgloss.NewStyle().Width(width).Render(header)
+	content := header
+	if !b.collapsed && b.args.Len() > 0 {
+		content = header + "\n" + b.styles.Muted.Render(b.args.String())
 	}
-	full := header + "\n" + b.styles.Muted.Render(b.args.String())
-	return lipgloss.NewStyle().Width(width).Render(full)
+	return b.styles.ToolCallBg.
+		Width(width).
+		Render(content)
 }
