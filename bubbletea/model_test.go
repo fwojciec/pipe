@@ -759,6 +759,49 @@ func TestModel_StatusBar(t *testing.T) {
 	})
 }
 
+func TestModel_WelcomeScreen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty session shows welcome art", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		view := m.View()
+		assert.Contains(t, view, "pipe")
+		assert.Contains(t, view, "Ceci n'est pas une pipe.")
+	})
+
+	t.Run("welcome disappears after first message", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Welcome is visible initially.
+		assert.Contains(t, m.View(), "Ceci n'est pas une pipe.")
+		// First event adds a block, welcome should disappear.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hello"}})
+		assert.NotContains(t, m.View(), "Ceci n'est pas une pipe.")
+	})
+
+	t.Run("small viewport does not panic", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithSize(t, nopAgent, 10, 5)
+		assert.NotPanics(t, func() { m.View() })
+	})
+
+	t.Run("session with messages shows no welcome", func(t *testing.T) {
+		t.Parallel()
+		session := &pipe.Session{
+			Messages: []pipe.Message{
+				pipe.UserMessage{Content: []pipe.ContentBlock{
+					pipe.TextBlock{Text: "hello"},
+				}},
+			},
+		}
+		theme := pipe.DefaultTheme()
+		m := bt.New(nopAgent, session, theme, bt.Config{})
+		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+		assert.NotContains(t, m.View(), "Ceci n'est pas une pipe.")
+	})
+}
+
 func TestModel_InputHeightResetOnSubmit(t *testing.T) {
 	t.Parallel()
 

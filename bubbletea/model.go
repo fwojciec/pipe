@@ -392,7 +392,7 @@ func (m Model) renderSession() Model {
 
 func (m Model) renderContent() string {
 	if len(m.blocks) == 0 {
-		return ""
+		return m.welcomeView()
 	}
 	var b strings.Builder
 	for i, block := range m.blocks {
@@ -494,6 +494,56 @@ func (m Model) cycleFocusPrev() Model {
 	}
 	m.blockFocus = -1
 	return m
+}
+
+func (m Model) welcomeView() string {
+	art := `         _
+   _ __ (_)_ __   ___
+  | '_ \| | '_ \ / _ \
+  | |_) | | |_) |  __/
+  | .__/|_| .__/ \___|
+  |_|     |_|
+
+  Ceci n'est pas une pipe.`
+
+	styled := m.styles.Accent.Render(art)
+
+	// Center horizontally and vertically within viewport.
+	artLines := strings.Split(styled, "\n")
+	artH := len(artLines)
+	artW := 0
+	for _, line := range artLines {
+		if w := lipgloss.Width(line); w > artW {
+			artW = w
+		}
+	}
+
+	vpW := m.Viewport.Width
+	vpH := m.Viewport.Height
+
+	padTop := (vpH - artH) / 2
+	if padTop < 0 {
+		padTop = 0
+	}
+	padLeft := (vpW - artW) / 2
+	if padLeft < 0 {
+		padLeft = 0
+	}
+
+	var b strings.Builder
+	for range padTop {
+		b.WriteString("\n")
+	}
+	prefix := strings.Repeat(" ", padLeft)
+	for i, line := range artLines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(prefix)
+		b.WriteString(line)
+	}
+
+	return b.String()
 }
 
 func (m Model) statusLine() string {
