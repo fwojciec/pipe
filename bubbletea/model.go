@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/fwojciec/pipe"
 	"github.com/fwojciec/pipe/bubbletea/textarea"
 )
@@ -456,7 +457,8 @@ func (m Model) cycleFocusPrev() Model {
 
 func (m Model) statusLine() string {
 	if m.err != nil {
-		return m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
+		content := m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
+		return lipgloss.NewStyle().Width(m.Viewport.Width).Render(content)
 	}
 	if m.running {
 		return m.styles.Muted.Render("Generating...")
