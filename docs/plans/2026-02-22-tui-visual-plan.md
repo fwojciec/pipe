@@ -978,102 +978,34 @@ git commit -m "feat: ASCII art welcome screen for empty sessions"
 
 ### Task 9: Block spacing — tool cluster grouping
 
-Currently `renderContent` puts `"\n"` between every block. All adjacent
-tool-related blocks (ToolCallBlock and ToolResultBlock) should cluster with
-no blank line between them, regardless of order. This handles multi-tool turns
-where the block order may be: call(1), call(2), result(1), result(2).
+Currently `renderContent` puts `"\n"` between every block. Two changes:
+1. Non-tool boundaries become `"\n\n"` (blank line for visual separation).
+2. Adjacent tool blocks use `"\n"` (line break only — they cluster).
+
+This handles multi-tool turns where the block order may be:
+call(1), call(2), result(1), result(2).
 
 **Files:**
-- Modify: `bubbletea/model.go` (renderContent)
+- Modify: `bubbletea/model.go` (renderContent, blockSeparator, isToolBlock)
+- Create: `bubbletea/export_test.go` (test-only exports, package bubbletea)
 - Add test: `bubbletea/model_test.go`
 
-**Step 1: Write tests for spacing behavior**
+**Step 1: Extract separator logic into a testable function**
 
-The tests use a `renderBlocks` test helper (exported from model.go) that
-calls `renderContent` directly to get the raw string before viewport padding.
-This avoids viewport line-filling artifacts that obscure spacing checks.
+The separator between blocks is a pure function of the two adjacent block
+types. Extract it so it can be unit-tested directly without rendering.
 
 Add to `bubbletea/model.go`:
 
 ```go
-// RenderBlocks exposes renderContent for testing block spacing.
-func (m Model) RenderBlocks() string { return m.renderContent() }
-```
-
-```go
-func TestModel_BlockSpacing(t *testing.T) {
-	t.Parallel()
-
-	t.Run("no blank line between adjacent tool blocks", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Text block, then tool call + tool result.
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "before"}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "output", IsError: false}})
-
-		raw := m.RenderBlocks()
-		// Render each block individually to find their boundaries.
-		blocks := []string{"before", "bash"}
-		for _, b := range blocks {
-			assert.Contains(t, raw, b)
-		}
-		// Text → tool call: separated by blank line ("\n" separator).
-		// Tool call → tool result: NO blank line (adjacent tool blocks cluster).
-		// Split by blocks: find the tool call output and tool result output.
-		// The raw string should NOT have "\n\n" between the two tool blocks,
-		// but SHOULD have "\n\n" between the text block and first tool block.
-		//
-		// Strategy: count "\n\n" occurrences. With 3 blocks and 1 suppressed
-		// separator, we expect exactly 1 blank-line separator (text → tool call).
-		assert.Equal(t, 1, strings.Count(raw, "\n\n"),
-			"expected exactly 1 blank-line separator (text→tool), got raw:\n%s", raw)
-	})
-
-	t.Run("multi-tool cluster stays grouped", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Two tool calls, then two tool results — all 4 should cluster.
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-2", Name: "bash"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "data", IsError: false}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "done", IsError: false}})
-
-		raw := m.RenderBlocks()
-		// All 4 blocks are tool-related — zero blank-line separators.
-		assert.Equal(t, 0, strings.Count(raw, "\n\n"),
-			"expected no blank-line separators in tool cluster, got raw:\n%s", raw)
-	})
-}
-```
-
-**Step 2: Implement cluster spacing**
-
-Update `renderContent` in `bubbletea/model.go`. Tool-related blocks are any
-`*ToolCallBlock` or `*ToolResultBlock`. Adjacent tool blocks get no separator:
-
-```go
-func (m Model) renderContent() string {
-	if len(m.blocks) == 0 {
-		return m.welcomeView()
+// blockSeparator returns the string inserted between adjacent blocks.
+// Tool-related blocks cluster with a single line break; all other
+// boundaries get a blank line.
+func blockSeparator(prev, curr MessageBlock) string {
+	if isToolBlock(prev) && isToolBlock(curr) {
+		return "\n" // line break only — no blank line
 	}
-	var b strings.Builder
-	for i, block := range m.blocks {
-		if i > 0 {
-			// Suppress blank line between adjacent tool-related blocks.
-			// This clusters call(1), call(2), result(1), result(2) etc.
-			if isToolBlock(m.blocks[i-1]) && isToolBlock(block) {
-				// No separator — they form a visual unit.
-			} else {
-				b.WriteString("\n")
-			}
-		}
-		b.WriteString(block.View(m.Viewport.Width))
-	}
-	return b.String()
+	return "\n\n" // blank line
 }
 
 // isToolBlock returns true for blocks that form tool clusters.
@@ -1086,21 +1018,111 @@ func isToolBlock(b MessageBlock) bool {
 }
 ```
 
-**Step 3: Run test to verify pass**
+Expose for external test package via `bubbletea/export_test.go`:
 
+```go
+package bubbletea
+
+// BlockSeparator exposes blockSeparator for testing.
+func BlockSeparator(prev, curr MessageBlock) string {
+	return blockSeparator(prev, curr)
+}
+```
+
+**Step 2: Write tests for separator logic**
+
+Test the pure function directly — no rendering, no fragile string counting:
+
+```go
+func TestBlockSeparator(t *testing.T) {
+	t.Parallel()
+	styles := bt.NewStyles(pipe.DefaultTheme())
+	theme := pipe.DefaultTheme()
+
+	tc := bt.NewToolCallBlock("bash", "tc-1", styles)
+	tr := bt.NewToolResultBlock("bash", "ok", false, styles)
+	txt := bt.NewAssistantTextBlock(theme)
+	usr := bt.NewUserMessageBlock("hi", styles)
+
+	t.Run("tool-to-tool is line break only", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "\n", bt.BlockSeparator(tc, tr))
+		assert.Equal(t, "\n", bt.BlockSeparator(tr, tc))
+		assert.Equal(t, "\n", bt.BlockSeparator(tc, tc))
+		assert.Equal(t, "\n", bt.BlockSeparator(tr, tr))
+	})
+
+	t.Run("non-tool boundaries get blank line", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "\n\n", bt.BlockSeparator(txt, tc))
+		assert.Equal(t, "\n\n", bt.BlockSeparator(tr, txt))
+		assert.Equal(t, "\n\n", bt.BlockSeparator(usr, tc))
+		assert.Equal(t, "\n\n", bt.BlockSeparator(txt, usr))
+	})
+}
+```
+
+**Step 3: Write integration test for block presence**
+
+Keep a simple smoke test that verifies blocks appear — no spacing assertions:
+
+```go
+func TestModel_BlockSpacing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("multi-tool cluster renders all blocks", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "before"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-2", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "data", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "done", IsError: false}})
+
+		view := m.Viewport.View()
+		assert.Contains(t, view, "before")
+		assert.Contains(t, view, "read")
+		assert.Contains(t, view, "bash")
+	})
+}
+```
+
+**Step 4: Implement renderContent with blockSeparator**
+
+```go
+func (m Model) renderContent() string {
+	if len(m.blocks) == 0 {
+		return m.welcomeView()
+	}
+	var b strings.Builder
+	for i, block := range m.blocks {
+		if i > 0 {
+			b.WriteString(blockSeparator(m.blocks[i-1], block))
+		}
+		b.WriteString(block.View(m.Viewport.Width))
+	}
+	return b.String()
+}
+```
+
+**Step 5: Run tests to verify pass**
+
+Run: `go test ./bubbletea/ -run TestBlockSeparator -v`
 Run: `go test ./bubbletea/ -run TestModel_BlockSpacing -v`
 Expected: PASS
 
-**Step 4: Run full test suite**
+**Step 6: Run full test suite**
 
 Run: `make validate`
 Expected: All pass
 
-**Step 5: Commit**
+**Step 7: Commit**
 
 ```bash
-git add bubbletea/model.go bubbletea/model_test.go
-git commit -m "feat: grouped tool call + result block spacing"
+git add bubbletea/model.go bubbletea/export_test.go bubbletea/model_test.go
+git commit -m "feat: tool cluster spacing with blank-line separators"
 ```
 
 ---
