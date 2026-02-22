@@ -397,11 +397,31 @@ func (m Model) renderContent() string {
 	var b strings.Builder
 	for i, block := range m.blocks {
 		if i > 0 {
-			b.WriteString("\n")
+			b.WriteString(blockSeparator(m.blocks[i-1], block))
 		}
 		b.WriteString(block.View(m.Viewport.Width))
 	}
 	return b.String()
+}
+
+// isToolBlock reports whether b is a tool call or tool result block.
+func isToolBlock(b MessageBlock) bool {
+	switch b.(type) {
+	case *ToolCallBlock, *ToolResultBlock:
+		return true
+	default:
+		return false
+	}
+}
+
+// blockSeparator returns the separator between two adjacent blocks.
+// Adjacent tool blocks (call/result) get a single newline to cluster together;
+// all other transitions get a blank line for visual breathing room.
+func blockSeparator(prev, curr MessageBlock) string {
+	if isToolBlock(prev) && isToolBlock(curr) {
+		return "\n"
+	}
+	return "\n\n"
 }
 
 // resetTurnState clears the active block maps and hadToolCalls flag, preparing
