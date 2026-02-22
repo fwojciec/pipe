@@ -1083,20 +1083,22 @@ func (m Model) RenderContent() string { return m.renderContent() }
 func TestModel_BlockSpacing(t *testing.T) {
 	t.Parallel()
 
+	const toolContent = "ok"
+
 	t.Run("tool-only sequence has no blank lines", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: toolContent, IsError: false}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-2", Name: "bash"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "ok", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: toolContent, IsError: false}})
 
 		raw := m.RenderContent()
 		// Content must be single-line and renderers must produce compact output
 		// for this assertion to hold.
-		require.NotContains(t, "ok", "\n\n", "test data must be single-line")
+		require.NotContains(t, toolContent, "\n\n", "test data must be single-line")
 		assert.NotContains(t, raw, "\n\n",
 			"tool cluster should have no blank lines, got:\n%s", raw)
 	})
@@ -1107,7 +1109,7 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hi"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: toolContent, IsError: false}})
 
 		raw := m.RenderContent()
 		assert.Equal(t, 1, strings.Count(raw, "\n\n"),
