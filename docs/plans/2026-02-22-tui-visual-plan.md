@@ -1065,8 +1065,10 @@ func TestBlockSeparator(t *testing.T) {
 **Step 3: Write integration test bridging separator logic to renderContent**
 
 Expose `renderContent` via `export_test.go` and compare two scenarios:
-tool-only blocks (no `\n\n`) vs mixed blocks (has `\n\n`). Both use short,
-single-line content so internal `\n\n` from block renderers is impossible.
+tool-only blocks with multiple tools (no `\n\n`) vs mixed blocks (has `\n\n`).
+Both use short, single-line content so internal `\n\n` from block renderers
+is impossible. The tool-only test uses two adjacent tools to exercise the
+tool→tool separator path through `renderContent`.
 
 Add to `bubbletea/export_test.go`:
 
@@ -1085,6 +1087,9 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-2", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "ok", IsError: false}})
 
 		raw := m.RenderContent()
 		assert.NotContains(t, raw, "\n\n",
