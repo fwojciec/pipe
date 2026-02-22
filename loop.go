@@ -128,7 +128,7 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 	// Execute each tool call and append results to the session.
 	for _, tc := range toolCalls {
 		result, execErr := l.executor.Execute(ctx, tc.Name, tc.Arguments)
-		if execErr != nil {
+		if execErr != nil || result == nil {
 			result = &ToolResult{
 				Content: []ContentBlock{TextBlock{Text: execErr.Error()}},
 				IsError: true,
