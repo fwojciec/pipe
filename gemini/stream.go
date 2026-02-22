@@ -294,10 +294,11 @@ func (s *stream) backfillThinkingSignature(sig []byte) {
 		if s.blocks[i].blockType == "thinking" {
 			bs := s.blocks[i]
 			if len(bs.signature) == 0 {
-				bs.signature = slices.Clone(sig)
+				cloned := slices.Clone(sig)
+				bs.signature = cloned
 				s.msg.Content[i] = pipe.ThinkingBlock{
 					Thinking:  bs.textBuf.String(),
-					Signature: slices.Clone(sig),
+					Signature: cloned,
 				}
 			}
 			return

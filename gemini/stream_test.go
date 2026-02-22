@@ -272,6 +272,134 @@ func TestStream_FunctionCallThoughtSignatureBackfillsThinking(t *testing.T) {
 	assert.Equal(t, pipe.StopToolUse, msg.StopReason)
 }
 
+func TestStream_FunctionCallThoughtSignatureNoPrecedingThinkingBlock(t *testing.T) {
+	t.Parallel()
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{
+						FunctionCall: &genai.FunctionCall{
+							ID:   "tc_1",
+							Name: "read",
+							Args: map[string]any{"path": "a.go"},
+						},
+						ThoughtSignature: []byte("sig-orphan"),
+					},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 8,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks))
+	events := collectStreamEvents(t, s)
+
+	require.Len(t, events, 2)
+	assert.IsType(t, pipe.EventToolCallBegin{}, events[0])
+	assert.IsType(t, pipe.EventToolCallEnd{}, events[1])
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 1)
+	assert.Equal(t, pipe.ToolCallBlock{
+		ID:        "tc_1",
+		Name:      "read",
+		Arguments: json.RawMessage(`{"path":"a.go"}`),
+	}, msg.Content[0])
+}
+
+func TestStream_FunctionCallThoughtSignatureDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{Text: "reasoning", Thought: true, ThoughtSignature: []byte("original-sig")},
+					{
+						FunctionCall: &genai.FunctionCall{
+							ID:   "tc_1",
+							Name: "read",
+							Args: map[string]any{"path": "a.go"},
+						},
+						ThoughtSignature: []byte("sig-from-call"),
+					},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 8,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks))
+	events := collectStreamEvents(t, s)
+
+	require.Len(t, events, 3)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 2)
+	assert.Equal(t, pipe.ThinkingBlock{
+		Thinking:  "reasoning",
+		Signature: []byte("original-sig"),
+	}, msg.Content[0])
+}
+
+func TestStream_TwoFunctionCallsBackfillOnce(t *testing.T) {
+	t.Parallel()
+	chunks := []*genai.GenerateContentResponse{
+		{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Parts: []*genai.Part{
+					{Text: "reasoning", Thought: true},
+					{
+						FunctionCall: &genai.FunctionCall{
+							ID:   "tc_1",
+							Name: "read",
+							Args: map[string]any{"path": "a.go"},
+						},
+						ThoughtSignature: []byte("first-sig"),
+					},
+					{
+						FunctionCall: &genai.FunctionCall{
+							ID:   "tc_2",
+							Name: "read",
+							Args: map[string]any{"path": "b.go"},
+						},
+						ThoughtSignature: []byte("second-sig"),
+					},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount:     10,
+				CandidatesTokenCount: 8,
+			},
+		},
+	}
+
+	s := gemini.NewStreamFromIter(context.Background(), mockChunks(chunks))
+	events := collectStreamEvents(t, s)
+
+	require.Len(t, events, 5)
+
+	msg, err := s.Message()
+	require.NoError(t, err)
+	require.Len(t, msg.Content, 3)
+	// First backfill wins; second is ignored because signature is already set.
+	assert.Equal(t, pipe.ThinkingBlock{
+		Thinking:  "reasoning",
+		Signature: []byte("first-sig"),
+	}, msg.Content[0])
+}
+
 func TestStream_InterleavedThinkTextThink(t *testing.T) {
 	t.Parallel()
 	// Interleaved think/text/think produces 3 blocks, not 2.
