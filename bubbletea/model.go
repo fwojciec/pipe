@@ -17,6 +17,13 @@ import (
 
 var _ tea.Model = Model{}
 
+// Config holds display metadata for the TUI status bar.
+type Config struct {
+	WorkDir   string // Working directory path
+	GitBranch string // Current git branch (empty if not in a repo)
+	ModelName string // LLM model name
+}
+
 // Model is the Bubble Tea model for the pipe TUI.
 type Model struct {
 	// Input is the multi-line text input component. Exported for test access.
@@ -28,6 +35,7 @@ type Model struct {
 	session *pipe.Session
 	theme   pipe.Theme
 	styles  Styles
+	config  Config
 
 	blocks     []MessageBlock
 	blockFocus int // index of focused collapsible block (-1 = none)
@@ -56,8 +64,8 @@ type Model struct {
 	ready        bool
 }
 
-// New creates a new TUI Model with the given agent function, session, and theme.
-func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
+// New creates a new TUI Model with the given agent function, session, theme, and config.
+func New(run AgentFunc, session *pipe.Session, theme pipe.Theme, config Config) Model {
 	ta := textarea.New()
 	ta.MaxHeight = 3
 	// Defensive fallback: handleKey intercepts Enter at line 225 before the
@@ -73,6 +81,7 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
 		session:        session,
 		theme:          theme,
 		styles:         NewStyles(theme),
+		config:         config,
 		blockFocus:     -1,
 		mouseEnabled:   false,
 		activeText:     make(map[int]*AssistantTextBlock),
@@ -177,14 +186,20 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
+	sep := strings.Repeat("─", m.Viewport.Width)
+
 	var b strings.Builder
 
 	// Output area.
 	b.WriteString(m.Viewport.View())
 	b.WriteString("\n")
 
-	// Status line.
+	// Status bar with separators.
+	b.WriteString(sep)
+	b.WriteString("\n")
 	b.WriteString(m.statusLine())
+	b.WriteString("\n")
+	b.WriteString(sep)
 	b.WriteString("\n")
 
 	// Input area.
@@ -216,9 +231,8 @@ func (m Model) handleWindowSize(msg tea.WindowSizeMsg) Model {
 
 // viewportHeight computes the viewport height given the current input height.
 func (m Model) viewportHeight(inputH int) int {
-	const statusHeight = 1
-	const borderHeight = 2 // newlines between sections
-	h := m.windowHeight - inputH - statusHeight - borderHeight
+	const statusHeight = 3 // separator + status + separator
+	h := m.windowHeight - inputH - statusHeight
 	if h < 1 {
 		h = 1
 	}
@@ -483,17 +497,87 @@ func (m Model) cycleFocusPrev() Model {
 }
 
 func (m Model) statusLine() string {
+	w := m.Viewport.Width
 	if m.err != nil {
 		content := m.styles.Error.Render(fmt.Sprintf("Error: %v", m.err))
-		return lipgloss.NewStyle().Width(m.Viewport.Width).Render(content)
+		return lipgloss.NewStyle().Width(w).Render(content)
 	}
+
+	// Left: working directory + git branch.
+	left := m.styles.Muted.Render(m.config.WorkDir)
+	if m.config.GitBranch != "" {
+		left += m.styles.Muted.Render(" ") + m.styles.Accent.Render(m.config.GitBranch)
+	}
+
+	// Center: activity indicator when running.
+	center := ""
 	if m.running {
-		return m.styles.Muted.Render("Generating...")
+		center = m.styles.Accent.Render("●")
 	}
-	if m.mouseEnabled {
-		return m.styles.Muted.Render("Mouse capture on (Alt+M to release), Enter to send, Ctrl+C to quit")
+
+	// Right: model name.
+	right := m.styles.Muted.Render(m.config.ModelName)
+
+	// Layout: left | center | right, padded to fill width.
+	// Truncate left and right to fit within available width.
+	leftW := lipgloss.Width(left)
+	centerW := lipgloss.Width(center)
+	rightW := lipgloss.Width(right)
+
+	minGaps := 0
+	if centerW > 0 {
+		minGaps = 2 // one gap on each side of center
+	} else if leftW > 0 && rightW > 0 {
+		minGaps = 1
 	}
-	return m.styles.Muted.Render("Enter to send, Ctrl+C to quit")
+
+	// Truncate content to fit within terminal width.
+	available := w - centerW - minGaps
+	if leftW+rightW > available {
+		// Give right side at most half, left gets the rest.
+		maxRight := available / 2
+		if rightW > maxRight {
+			right = truncateRight(right, maxRight)
+			rightW = lipgloss.Width(right)
+		}
+		maxLeft := available - rightW
+		if leftW > maxLeft {
+			left = truncateRight(left, maxLeft)
+			leftW = lipgloss.Width(left)
+		}
+	}
+
+	if centerW > 0 {
+		// Center the indicator, pad left and right.
+		gapLeft := w/2 - leftW - centerW/2
+		gapRight := w - leftW - gapLeft - centerW - rightW
+		if gapLeft < 0 {
+			gapLeft = 0
+		}
+		if gapRight < 0 {
+			gapRight = 0
+		}
+		return left + strings.Repeat(" ", gapLeft) + center + strings.Repeat(" ", gapRight) + right
+	}
+
+	// No center content: left ... right.
+	gap := w - leftW - rightW
+	if gap < 0 {
+		gap = 0
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// truncateRight truncates an ANSI-styled string to fit within maxWidth visible
+// characters using lipgloss's ANSI-aware width limiting.
+func truncateRight(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	return lipgloss.NewStyle().MaxWidth(maxWidth).Render(s)
 }
 
 // startAgent runs the agent loop in a goroutine and signals completion.

@@ -26,7 +26,7 @@ func TestNew(t *testing.T) {
 
 	session := &pipe.Session{}
 	theme := pipe.DefaultTheme()
-	m := bt.New(nopAgent, session, theme)
+	m := bt.New(nopAgent, session, theme, bt.Config{})
 
 	assert.False(t, m.Running())
 	assert.NoError(t, m.Err())
@@ -40,7 +40,7 @@ func TestModel_Update(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		model, ok := updated.(bt.Model)
 		require.True(t, ok)
@@ -57,7 +57,7 @@ func TestModel_Update(t *testing.T) {
 
 		// Verify initial dimensions differ from resize target.
 		assert.Equal(t, 80, m.Viewport.Width)
-		assert.Equal(t, 20, m.Viewport.Height) // 24 - 1 - 1 - 2 = 20
+		assert.Equal(t, 20, m.Viewport.Height) // 24 - 1(input) - 3(status) = 20
 
 		// Send a second WindowSizeMsg with different dimensions.
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -65,7 +65,7 @@ func TestModel_Update(t *testing.T) {
 		require.True(t, ok)
 
 		assert.Equal(t, 120, model.Viewport.Width)
-		// Height = 40 - inputHeight(1) - statusHeight(1) - borderHeight(2) = 36
+		// Height = 40 - 1(input) - 3(status) = 36
 		assert.Equal(t, 36, model.Viewport.Height)
 
 		view := model.View()
@@ -278,12 +278,12 @@ func TestModel_Update(t *testing.T) {
 		t.Parallel()
 
 		m := initModel(t, nopAgent)
-		// Initial viewport height: 24 - 1(input) - 1(status) - 2(borders) = 20
+		// Initial viewport height: 24 - 1(input) - 3(status) = 20
 		assert.Equal(t, 20, m.Viewport.Height)
 
 		// Simulate input growing to 3 lines.
 		m = updateModel(t, m, textarea.InputHeightMsg{Height: 3})
-		// Viewport should shrink: 24 - 3(input) - 1(status) - 2(borders) = 18
+		// Viewport should shrink: 24 - 3(input) - 3(status) = 18
 		assert.Equal(t, 18, m.Viewport.Height)
 	})
 
@@ -376,7 +376,7 @@ func TestModel_BlockAssembly(t *testing.T) {
 		t.Parallel()
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 		m.Input.SetValue("hi")
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -506,7 +506,7 @@ func TestModel_SessionReloadBlockFocus(t *testing.T) {
 			},
 		}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 		// Thinking block should start collapsed — content not visible.
@@ -595,15 +595,6 @@ func TestModel_MouseToggle(t *testing.T) {
 		assert.False(t, m.MouseEnabled())
 	})
 
-	t.Run("status line shows mouse hint when enabled", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Default state: no mouse hint.
-		assert.NotContains(t, m.View(), "Alt+M")
-		// Enable mouse: hint appears.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.Contains(t, m.View(), "Alt+M")
-	})
 }
 
 func TestModel_MouseEscapeFilter(t *testing.T) {
@@ -712,6 +703,62 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 	})
 }
 
+func TestModel_StatusBar(t *testing.T) {
+	t.Parallel()
+
+	t.Run("displays working directory", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{WorkDir: "~/projects/app"})
+		view := m.View()
+		assert.Contains(t, view, "~/projects/app")
+	})
+
+	t.Run("displays git branch", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{GitBranch: "feat/login"})
+		view := m.View()
+		assert.Contains(t, view, "feat/login")
+	})
+
+	t.Run("displays model name", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
+		view := m.View()
+		assert.Contains(t, view, "claude-opus")
+	})
+
+	t.Run("displays activity indicator when running", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
+		m.Input.SetValue("hello")
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		view := m.View()
+		assert.Contains(t, view, "●")
+	})
+
+	t.Run("no activity indicator when idle", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
+		view := m.View()
+		assert.NotContains(t, view, "●")
+	})
+
+	t.Run("narrow terminal does not panic", func(t *testing.T) {
+		t.Parallel()
+		session := &pipe.Session{}
+		theme := pipe.DefaultTheme()
+		m := bt.New(nopAgent, session, theme, bt.Config{
+			WorkDir:   "~/very/long/path/to/project",
+			GitBranch: "feature/very-long-branch-name",
+			ModelName: "claude-opus-4",
+		})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
+		model, ok := updated.(bt.Model)
+		require.True(t, ok)
+		assert.NotPanics(t, func() { model.View() })
+	})
+}
+
 func TestModel_InputHeightResetOnSubmit(t *testing.T) {
 	t.Parallel()
 
@@ -720,7 +767,7 @@ func TestModel_InputHeightResetOnSubmit(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 		m = updateModel(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
 		// Type multi-line input.
@@ -752,7 +799,7 @@ func TestModel_Integration(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 
 		// Initialize viewport.
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -846,7 +893,8 @@ func TestModel_Teatest(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(agent, session, theme)
+		cfg := bt.Config{ModelName: "test-model"}
+		m := bt.New(agent, session, theme, cfg)
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -857,7 +905,8 @@ func TestModel_Teatest(t *testing.T) {
 
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("Hello!")) &&
-				bytes.Contains(out, []byte("Enter to send"))
+				bytes.Contains(out, []byte("test-model")) &&
+				!bytes.Contains(out, []byte("●"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -885,7 +934,7 @@ func TestModel_Teatest(t *testing.T) {
 			},
 		}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -919,7 +968,7 @@ func TestModel_Teatest(t *testing.T) {
 			},
 		}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -949,7 +998,8 @@ func TestModel_Teatest(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(agent, session, theme)
+		cfg := bt.Config{ModelName: "test-model"}
+		m := bt.New(agent, session, theme, cfg)
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -961,7 +1011,8 @@ func TestModel_Teatest(t *testing.T) {
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("hi")) &&
 				bytes.Contains(out, []byte("Done!")) &&
-				bytes.Contains(out, []byte("Enter to send"))
+				bytes.Contains(out, []byte("test-model")) &&
+				!bytes.Contains(out, []byte("●"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -983,7 +1034,7 @@ func TestModel_Teatest(t *testing.T) {
 			},
 		}
 		theme := pipe.DefaultTheme()
-		m := bt.New(nopAgent, session, theme)
+		m := bt.New(nopAgent, session, theme, bt.Config{})
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -1021,7 +1072,8 @@ func TestModel_Teatest(t *testing.T) {
 
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
-		m := bt.New(agent, session, theme)
+		cfg := bt.Config{ModelName: "test-model"}
+		m := bt.New(agent, session, theme, cfg)
 
 		tm := teatest.NewTestModel(t, m,
 			teatest.WithInitialTermSize(80, 24),
@@ -1042,7 +1094,8 @@ func TestModel_Teatest(t *testing.T) {
 
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("recovered")) &&
-				bytes.Contains(out, []byte("Enter to send"))
+				bytes.Contains(out, []byte("test-model")) &&
+				!bytes.Contains(out, []byte("●"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

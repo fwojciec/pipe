@@ -20,8 +20,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fwojciec/pipe"
@@ -85,7 +87,12 @@ func run() error {
 
 	// Create and run TUI.
 	theme := pipe.DefaultTheme()
-	tuiModel := bt.New(agentFn, &session, theme)
+	config := bt.Config{
+		WorkDir:   workDir(),
+		GitBranch: gitBranch(),
+		ModelName: modelID,
+	}
+	tuiModel := bt.New(agentFn, &session, theme, config)
 
 	if err := bt.Run(ctx, tuiModel); err != nil {
 		return fmt.Errorf("TUI: %w", err)
@@ -146,4 +153,48 @@ func defaultSessionPath(id string) string {
 		home = "."
 	}
 	return filepath.Join(home, ".pipe", "sessions", id+".json")
+}
+
+func workDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dir
+	}
+	if rel, ok := strings.CutPrefix(dir, home); ok {
+		return "~" + rel
+	}
+	return dir
+}
+
+func gitBranch() string {
+	// Walk up from cwd looking for a .git entry to avoid spawning git
+	// outside repositories (saves ~50-100ms startup latency).
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	found := false
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			found = true
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if !found {
+		return ""
+	}
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

@@ -15,7 +15,7 @@ func initModel(t *testing.T, run bt.AgentFunc) bt.Model {
 	t.Helper()
 	session := &pipe.Session{}
 	theme := pipe.DefaultTheme()
-	m := bt.New(run, session, theme)
+	m := bt.New(run, session, theme, bt.Config{})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, ok := updated.(bt.Model)
 	require.True(t, ok)
@@ -27,8 +27,20 @@ func initModelWithSize(t *testing.T, run bt.AgentFunc, width, height int) bt.Mod
 	t.Helper()
 	session := &pipe.Session{}
 	theme := pipe.DefaultTheme()
-	m := bt.New(run, session, theme)
+	m := bt.New(run, session, theme, bt.Config{})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	model, ok := updated.(bt.Model)
+	require.True(t, ok)
+	return model
+}
+
+// initModelWithConfig creates a model with a custom config and default size.
+func initModelWithConfig(t *testing.T, run bt.AgentFunc, config bt.Config) bt.Model {
+	t.Helper()
+	session := &pipe.Session{}
+	theme := pipe.DefaultTheme()
+	m := bt.New(run, session, theme, config)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	model, ok := updated.(bt.Model)
 	require.True(t, ok)
 	return model
