@@ -601,6 +601,8 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 	t.Run("mouse message does not reach input", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		// tea.MouseMsg is routed to viewport only (separate case in Update),
+		// independent of mouseEnabled state.
 		m = updateModel(t, m, tea.MouseMsg{
 			Button: tea.MouseButtonWheelDown,
 			Action: tea.MouseActionPress,
