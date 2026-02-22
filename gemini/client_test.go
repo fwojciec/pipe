@@ -57,7 +57,7 @@ func TestConvertMessages_ThinkingWithSignature(t *testing.T) {
 	assert.Equal(t, "Answer", got[0].Parts[1].Text)
 }
 
-func TestConvertMessages_ThinkingSignaturePropagatedToToolCall(t *testing.T) {
+func TestConvertMessages_ToolCallWithoutSignatureNoInference(t *testing.T) {
 	t.Parallel()
 	sig := []byte("thought-sig-data")
 	msgs := []pipe.Message{
@@ -72,9 +72,9 @@ func TestConvertMessages_ThinkingSignaturePropagatedToToolCall(t *testing.T) {
 	require.Len(t, got[0].Parts, 2)
 	// Thinking part has signature.
 	assert.Equal(t, sig, got[0].Parts[0].ThoughtSignature)
-	// Tool call part must also carry the signature.
+	// Tool call without its own signature gets nil — no inference from thinking.
 	require.NotNil(t, got[0].Parts[1].FunctionCall)
-	assert.Equal(t, sig, got[0].Parts[1].ThoughtSignature)
+	assert.Nil(t, got[0].Parts[1].ThoughtSignature)
 }
 
 func TestConvertMessages_ToolCallWithoutThinking(t *testing.T) {
@@ -92,22 +92,56 @@ func TestConvertMessages_ToolCallWithoutThinking(t *testing.T) {
 	assert.Nil(t, got[0].Parts[0].ThoughtSignature)
 }
 
-func TestConvertMessages_ThinkingSignaturePropagatedToMultipleToolCalls(t *testing.T) {
+func TestConvertMessages_MultipleToolCallsEachCarryOwnSignature(t *testing.T) {
 	t.Parallel()
-	sig := []byte("thought-sig-data")
+	sig1 := []byte("sig-1")
+	sig2 := []byte("sig-2")
 	msgs := []pipe.Message{
 		pipe.AssistantMessage{Content: []pipe.ContentBlock{
-			pipe.ThinkingBlock{Thinking: "reasoning", Signature: sig},
-			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
-			pipe.ToolCallBlock{ID: "call_2", Name: "read", Arguments: json.RawMessage(`{"path":"foo.go"}`)},
+			pipe.ThinkingBlock{Thinking: "reasoning", Signature: []byte("think-sig")},
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`), Signature: sig1},
+			pipe.ToolCallBlock{ID: "call_2", Name: "read", Arguments: json.RawMessage(`{"path":"foo.go"}`), Signature: sig2},
 		}},
 	}
 	got, err := gemini.ConvertMessages(msgs)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Len(t, got[0].Parts, 3)
-	assert.Equal(t, sig, got[0].Parts[1].ThoughtSignature)
-	assert.Equal(t, sig, got[0].Parts[2].ThoughtSignature)
+	assert.Equal(t, sig1, got[0].Parts[1].ThoughtSignature)
+	assert.Equal(t, sig2, got[0].Parts[2].ThoughtSignature)
+}
+
+func TestConvertMessages_ToolCallSignaturePreferredOverThinking(t *testing.T) {
+	t.Parallel()
+	thinkSig := []byte("thinking-sig")
+	callSig := []byte("call-sig")
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ThinkingBlock{Thinking: "reasoning", Signature: thinkSig},
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`), Signature: callSig},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Parts, 2)
+	// Call-level signature wins over thinking-level.
+	assert.Equal(t, callSig, got[0].Parts[1].ThoughtSignature)
+}
+
+func TestConvertMessages_ToolCallSignatureWithoutThinking(t *testing.T) {
+	t.Parallel()
+	callSig := []byte("orphan-sig")
+	msgs := []pipe.Message{
+		pipe.AssistantMessage{Content: []pipe.ContentBlock{
+			pipe.ToolCallBlock{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`), Signature: callSig},
+		}},
+	}
+	got, err := gemini.ConvertMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Len(t, got[0].Parts, 1)
+	assert.Equal(t, callSig, got[0].Parts[0].ThoughtSignature)
 }
 
 func TestConvertMessages_ToolCallAndResult(t *testing.T) {

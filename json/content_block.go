@@ -49,7 +49,12 @@ func marshalContentBlock(b pipe.ContentBlock) (contentBlock, error) {
 		return contentBlock{Type: "image", Data: &encoded, MimeType: &v.MimeType}, nil
 	case pipe.ToolCallBlock:
 		args := v.Arguments
-		return contentBlock{Type: "tool_call", ID: &v.ID, Name: &v.Name, Arguments: &args}, nil
+		cb := contentBlock{Type: "tool_call", ID: &v.ID, Name: &v.Name, Arguments: &args}
+		if len(v.Signature) > 0 {
+			encoded := base64.StdEncoding.EncodeToString(v.Signature)
+			cb.Signature = &encoded
+		}
+		return cb, nil
 	default:
 		return contentBlock{}, fmt.Errorf("unknown content block type: %T", b)
 	}
@@ -115,7 +120,15 @@ func unmarshalContentBlock(dto contentBlock) (pipe.ContentBlock, error) {
 		if dto.Arguments != nil {
 			args = *dto.Arguments
 		}
-		return pipe.ToolCallBlock{ID: id, Name: name, Arguments: args}, nil
+		var sig []byte
+		if dto.Signature != nil && *dto.Signature != "" {
+			var err error
+			sig, err = base64.StdEncoding.DecodeString(*dto.Signature)
+			if err != nil {
+				return nil, fmt.Errorf("decode tool call signature: %w", err)
+			}
+		}
+		return pipe.ToolCallBlock{ID: id, Name: name, Arguments: args, Signature: sig}, nil
 	default:
 		return nil, fmt.Errorf("unknown content block type: %q", dto.Type)
 	}

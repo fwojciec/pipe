@@ -87,6 +87,7 @@ type ToolCallBlock struct {
 	ID        string
 	Name      string
 	Arguments json.RawMessage
+	Signature []byte
 }
 
 func (ToolCallBlock) contentBlock() {}

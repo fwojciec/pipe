@@ -238,6 +238,7 @@ func (s *stream) processPart(part *genai.Part) error {
 			ID:        id,
 			Name:      part.FunctionCall.Name,
 			Arguments: json.RawMessage(rawArgs),
+			Signature: slices.Clone(part.ThoughtSignature),
 		}
 		s.msg.Content = append(s.msg.Content, call)
 		s.blocks = append(s.blocks, &blockState{blockType: "tool_call"})

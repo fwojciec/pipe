@@ -661,3 +661,107 @@ func TestMarshalSession_ToolCallComplexArguments(t *testing.T) {
 	tc := am.Content[0].(pipe.ToolCallBlock)
 	assert.JSONEq(t, string(complexArgs), string(tc.Arguments))
 }
+
+func TestMarshalSession_ToolCallSignatureRoundTrip(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "toolcall-sig",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content: []pipe.ContentBlock{
+					pipe.ToolCallBlock{
+						ID:        "tc_1",
+						Name:      "bash",
+						Arguments: json.RawMessage(`{"cmd":"ls"}`),
+						Signature: []byte("opaque-call-sig"),
+					},
+				},
+				StopReason: pipe.StopToolUse,
+				Timestamp:  time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	require.Len(t, am.Content, 1)
+	tc, ok := am.Content[0].(pipe.ToolCallBlock)
+	require.True(t, ok)
+	assert.Equal(t, "tc_1", tc.ID)
+	assert.Equal(t, "bash", tc.Name)
+	assert.Equal(t, []byte("opaque-call-sig"), tc.Signature)
+}
+
+func TestMarshalSession_ToolCallNilSignatureOmitted(t *testing.T) {
+	t.Parallel()
+	session := pipe.Session{
+		ID:        "no-toolcall-sig",
+		CreatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+		Messages: []pipe.Message{
+			pipe.AssistantMessage{
+				Content: []pipe.ContentBlock{
+					pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{"cmd":"ls"}`)},
+				},
+				StopReason: pipe.StopToolUse,
+				Timestamp:  time.Date(2026, 2, 18, 12, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	data, err := pipejson.MarshalSession(session)
+	require.NoError(t, err)
+
+	// Parse raw JSON to verify signature field is absent
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	var msgs []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw["messages"], &msgs))
+	require.Len(t, msgs, 1)
+	var content []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(msgs[0]["content"], &content))
+	require.Len(t, content, 1)
+	assert.NotContains(t, content[0], "signature")
+}
+
+func TestUnmarshalSession_BackwardCompatNoToolCallSignature(t *testing.T) {
+	t.Parallel()
+	// Old JSON without signature field in tool_call block
+	data := []byte(`{
+		"version": 1,
+		"id": "old-toolcall",
+		"created_at": "2026-02-18T12:00:00Z",
+		"updated_at": "2026-02-18T12:00:00Z",
+		"messages": [
+			{
+				"type": "assistant",
+				"content": [{"type": "tool_call", "id": "tc_1", "name": "bash", "arguments": {"cmd": "ls"}}],
+				"stop_reason": "tool_use",
+				"raw_stop_reason": "tool_use",
+				"usage": {"input_tokens": 10, "output_tokens": 5},
+				"timestamp": "2026-02-18T12:00:00Z"
+			}
+		]
+	}`)
+
+	got, err := pipejson.UnmarshalSession(data)
+	require.NoError(t, err)
+
+	require.Len(t, got.Messages, 1)
+	am, ok := got.Messages[0].(pipe.AssistantMessage)
+	require.True(t, ok)
+	require.Len(t, am.Content, 1)
+	tc, ok := am.Content[0].(pipe.ToolCallBlock)
+	require.True(t, ok)
+	assert.Equal(t, "tc_1", tc.ID)
+	assert.Nil(t, tc.Signature)
+}
