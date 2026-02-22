@@ -581,6 +581,18 @@ func TestModel_MouseToggle(t *testing.T) {
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		assert.Contains(t, m.View(), "Alt+M")
 	})
+
+	t.Run("submit re-enables mouse when disabled", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Disable mouse.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		assert.False(t, m.MouseEnabled())
+		// Type and submit.
+		m.Input.SetValue("hello")
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		assert.True(t, m.MouseEnabled())
+	})
 }
 
 func TestModel_InputHeightResetOnSubmit(t *testing.T) {

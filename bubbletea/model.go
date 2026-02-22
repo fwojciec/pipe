@@ -317,7 +317,15 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 
 	m.Input.Blur()
 
+	// Re-enable mouse capture so scrolling works during the run.
+	var mouseCmd tea.Cmd
+	if !m.mouseEnabled {
+		m.mouseEnabled = true
+		mouseCmd = tea.EnableMouseCellMotion
+	}
+
 	return m, tea.Batch(
+		mouseCmd,
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
 		listenForEvent(m.eventCh, m.doneCh),
 	)
