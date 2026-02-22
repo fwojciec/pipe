@@ -438,34 +438,38 @@ func (b *ToolResultBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 }
 
 func (b *ToolResultBlock) View(width int) string {
-	header := b.summaryLine()
 	var content string
 	if b.collapsed || b.content == "" {
-		content = header
+		// Collapsed: tool name + ✓/✗ + first-line preview.
+		content = b.headerLine(true)
 	} else {
+		// Expanded: tool name + ✓/✗ (no preview), then full content.
 		contentStyle := b.styles.Muted
 		if b.isError {
 			contentStyle = b.styles.Error
 		}
-		content = header + "\n" + contentStyle.Render(b.content)
+		content = b.headerLine(false) + "\n" + contentStyle.Render(b.content)
 	}
 	wrapped := lipgloss.NewStyle().Width(width).Render(content)
 	return b.styles.ToolResultBg.Width(width).Render(wrapped)
 }
 
-func (b *ToolResultBlock) summaryLine() string {
+// headerLine renders the tool name and status indicator. When withPreview is
+// true, the first line of content is appended as a summary (collapsed state).
+func (b *ToolResultBlock) headerLine(withPreview bool) string {
 	indicator := "✓"
 	indicatorStyle := b.styles.Success
 	if b.isError {
 		indicator = "✗"
 		indicatorStyle = b.styles.Error
 	}
-	summary := b.styles.ToolCall.Render(b.toolName) + " " + indicatorStyle.Render(indicator)
-	// Append first line of content as summary preview.
-	if first := firstLine(b.content); first != "" {
-		summary += "  " + b.styles.Muted.Render(first)
+	header := b.styles.ToolCall.Render(b.toolName) + " " + indicatorStyle.Render(indicator)
+	if withPreview {
+		if first := firstLine(b.content); first != "" {
+			header += "  " + b.styles.Muted.Render(first)
+		}
 	}
-	return summary
+	return header
 }
 
 // firstLine returns the first non-empty line of s, truncated to 60 chars.
@@ -820,18 +824,26 @@ Tests to update in `model_test.go`:
   toggle still works, but the status bar no longer advertises it.
 
 Tests to update in teatest section of `model_test.go`:
-- `"full agent cycle with event delivery"` — replace `"Enter to send"` wait
-  condition. Wait for "Hello!" content and absence of activity indicator:
+
+Teatest `WaitFor` scans cumulative terminal output. Once `●` appears in any
+frame it stays in the buffer forever, so `!Contains("●")` is unreliable.
+
+Instead, use `tm.FinalModel()` to check final state after the agent completes.
+Wait only for expected content, then verify idle state on the final model:
+
+- `"full agent cycle with event delivery"` — wait for "Hello!" only:
 
 ```go
 teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
-	return bytes.Contains(out, []byte("Hello!")) &&
-		!bytes.Contains(out, []byte("●"))
+	return bytes.Contains(out, []byte("Hello!"))
 }, teatest.WithDuration(5*time.Second))
 ```
 
-- Other teatests waiting for `"Enter to send"` — same pattern: wait for
-  expected content and absence of `"●"`.
+The existing `tm.FinalModel` + `assert.False(t, final.Running())` already
+verifies the agent finished. No need to detect idle via output scanning.
+
+- Other teatests waiting for `"Enter to send"` — replace with content-only
+  wait conditions (the specific content each test produces).
 
 **Step 9: Run full test suite**
 
@@ -977,6 +989,17 @@ where the block order may be: call(1), call(2), result(1), result(2).
 
 **Step 1: Write tests for spacing behavior**
 
+The tests use a `renderBlocks` test helper (exported from model.go) that
+calls `renderContent` directly to get the raw string before viewport padding.
+This avoids viewport line-filling artifacts that obscure spacing checks.
+
+Add to `bubbletea/model.go`:
+
+```go
+// RenderBlocks exposes renderContent for testing block spacing.
+func (m Model) RenderBlocks() string { return m.renderContent() }
+```
+
 ```go
 func TestModel_BlockSpacing(t *testing.T) {
 	t.Parallel()
@@ -984,27 +1007,34 @@ func TestModel_BlockSpacing(t *testing.T) {
 	t.Run("no blank line between adjacent tool blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Add text, then a tool call + result.
+		// Text block, then tool call + tool result.
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "before"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "output", IsError: false}})
 
-		// Render blocks directly to inspect spacing (avoid viewport padding).
-		// Tool call and tool result are adjacent — no double newline between.
-		// Text → tool call still has a blank line separator.
-		view := m.Viewport.View()
-		assert.Contains(t, view, "bash")
-		assert.Contains(t, view, "✓")
-		// The text block and tool cluster should be separated by a blank line,
-		// but tool call and tool result should NOT have a blank line between them.
-		// We verify by checking the rendered block sequence does not contain
-		// two consecutive newlines between the tool blocks.
+		raw := m.RenderBlocks()
+		// Render each block individually to find their boundaries.
+		blocks := []string{"before", "bash"}
+		for _, b := range blocks {
+			assert.Contains(t, raw, b)
+		}
+		// Text → tool call: separated by blank line ("\n" separator).
+		// Tool call → tool result: NO blank line (adjacent tool blocks cluster).
+		// Split by blocks: find the tool call output and tool result output.
+		// The raw string should NOT have "\n\n" between the two tool blocks,
+		// but SHOULD have "\n\n" between the text block and first tool block.
+		//
+		// Strategy: count "\n\n" occurrences. With 3 blocks and 1 suppressed
+		// separator, we expect exactly 1 blank-line separator (text → tool call).
+		assert.Equal(t, 1, strings.Count(raw, "\n\n"),
+			"expected exactly 1 blank-line separator (text→tool), got raw:\n%s", raw)
 	})
 
 	t.Run("multi-tool cluster stays grouped", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		// Two tool calls, then two tool results — all 4 should cluster.
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
@@ -1012,9 +1042,10 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "data", IsError: false}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "done", IsError: false}})
 
-		view := m.Viewport.View()
-		assert.Contains(t, view, "read")
-		assert.Contains(t, view, "bash")
+		raw := m.RenderBlocks()
+		// All 4 blocks are tool-related — zero blank-line separators.
+		assert.Equal(t, 0, strings.Count(raw, "\n\n"),
+			"expected no blank-line separators in tool cluster, got raw:\n%s", raw)
 	})
 }
 ```
