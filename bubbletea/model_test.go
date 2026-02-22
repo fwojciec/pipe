@@ -572,6 +572,18 @@ func TestModel_MouseToggle(t *testing.T) {
 		assert.False(t, m.MouseEnabled())
 	})
 
+	t.Run("submit preserves mouse enabled state", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Enable mouse.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		assert.True(t, m.MouseEnabled())
+		// Type and submit.
+		m.Input.SetValue("hello")
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		assert.True(t, m.MouseEnabled())
+	})
+
 	t.Run("status line shows mouse hint when enabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
