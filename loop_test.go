@@ -691,6 +691,66 @@ func TestLoop_Run(t *testing.T) {
 		assert.Equal(t, "first\nsecond", toolResults[0].Content)
 	})
 
+	t.Run("event handler emits EventToolResult for each tool call in a turn", func(t *testing.T) {
+		t.Parallel()
+
+		toolCallMsg := pipe.AssistantMessage{
+			Content: []pipe.ContentBlock{
+				pipe.ToolCallBlock{ID: "tc_1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+				pipe.ToolCallBlock{ID: "tc_2", Name: "read", Arguments: json.RawMessage(`{}`)},
+			},
+			StopReason: pipe.StopToolUse,
+		}
+		textMsg := pipe.AssistantMessage{
+			Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "done"}},
+			StopReason: pipe.StopEndTurn,
+		}
+
+		turn := 0
+		provider := &mock.Provider{
+			StreamFn: func(_ context.Context, _ pipe.Request) (pipe.Stream, error) {
+				turn++
+				if turn == 1 {
+					return completedStream(toolCallMsg), nil
+				}
+				return completedStream(textMsg), nil
+			},
+		}
+
+		executor := &mock.ToolExecutor{
+			ExecuteFn: func(_ context.Context, name string, _ json.RawMessage) (*pipe.ToolResult, error) {
+				return &pipe.ToolResult{
+					Content: []pipe.ContentBlock{pipe.TextBlock{Text: name + " output"}},
+				}, nil
+			},
+		}
+
+		var received []pipe.Event
+		handler := func(e pipe.Event) {
+			received = append(received, e)
+		}
+
+		session := &pipe.Session{}
+		loop := pipe.NewLoop(provider, executor)
+
+		err := loop.Run(context.Background(), session, nil, pipe.WithEventHandler(handler))
+		require.NoError(t, err)
+
+		var toolResults []pipe.EventToolResult
+		for _, e := range received {
+			if tr, ok := e.(pipe.EventToolResult); ok {
+				toolResults = append(toolResults, tr)
+			}
+		}
+		require.Len(t, toolResults, 2)
+		assert.Equal(t, "tc_1", toolResults[0].ID)
+		assert.Equal(t, "bash", toolResults[0].ToolName)
+		assert.Equal(t, "bash output", toolResults[0].Content)
+		assert.Equal(t, "tc_2", toolResults[1].ID)
+		assert.Equal(t, "read", toolResults[1].ToolName)
+		assert.Equal(t, "read output", toolResults[1].Content)
+	})
+
 	t.Run("event handler skips EventToolResult when content has no text blocks", func(t *testing.T) {
 		t.Parallel()
 
