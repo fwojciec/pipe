@@ -1092,6 +1092,8 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "ok", IsError: false}})
 
 		raw := m.RenderContent()
+		// Content must be single-line and renderers must produce compact output
+		// for this assertion to hold.
 		assert.NotContains(t, raw, "\n\n",
 			"tool cluster should have no blank lines, got:\n%s", raw)
 	})
@@ -1102,6 +1104,7 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hi"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
 
 		raw := m.RenderContent()
 		assert.Contains(t, raw, "\n\n",
