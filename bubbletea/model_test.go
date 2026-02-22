@@ -521,46 +521,46 @@ func TestModel_SessionReloadBlockFocus(t *testing.T) {
 func TestModel_MouseToggle(t *testing.T) {
 	t.Parallel()
 
-	t.Run("mouse enabled by default", func(t *testing.T) {
+	t.Run("mouse disabled by default", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		assert.False(t, m.MouseEnabled())
+	})
+
+	t.Run("alt+m toggles mouse on", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		assert.True(t, m.MouseEnabled())
 	})
 
-	t.Run("alt+m toggles mouse off", func(t *testing.T) {
+	t.Run("alt+m twice toggles mouse back off", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		assert.False(t, m.MouseEnabled())
 	})
 
-	t.Run("alt+m twice toggles mouse back on", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.True(t, m.MouseEnabled())
-	})
-
-	t.Run("alt+m returns disable then enable commands", func(t *testing.T) {
+	t.Run("alt+m returns enable then disable commands", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 
-		// First toggle: disable mouse.
+		// First toggle: enable mouse.
 		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		m = updated.(bt.Model)
-		require.NotNil(t, cmd)
-		disableMsg := cmd()
-		disableType := fmt.Sprintf("%T", disableMsg)
-
-		// Second toggle: re-enable mouse.
-		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		require.NotNil(t, cmd)
 		enableMsg := cmd()
 		enableType := fmt.Sprintf("%T", enableMsg)
 
+		// Second toggle: disable mouse.
+		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		require.NotNil(t, cmd)
+		disableMsg := cmd()
+		disableType := fmt.Sprintf("%T", disableMsg)
+
 		// The two commands should produce different message types.
-		assert.NotEqual(t, disableType, enableType)
+		assert.NotEqual(t, enableType, disableType)
 	})
 
 	t.Run("alt+m during agent run is ignored", func(t *testing.T) {
@@ -568,30 +568,18 @@ func TestModel_MouseToggle(t *testing.T) {
 		m := initModel(t, nopAgent)
 		m, _ = bt.SetRunning(m)
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		// Mouse should still be enabled — toggle was ignored.
-		assert.True(t, m.MouseEnabled())
+		// Mouse should still be disabled — toggle was ignored.
+		assert.False(t, m.MouseEnabled())
 	})
 
-	t.Run("status line shows mouse hint when disabled", func(t *testing.T) {
+	t.Run("status line shows mouse hint when enabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 		// Default state: no mouse hint.
 		assert.NotContains(t, m.View(), "Alt+M")
-		// Disable mouse: hint appears.
+		// Enable mouse: hint appears.
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		assert.Contains(t, m.View(), "Alt+M")
-	})
-
-	t.Run("submit re-enables mouse when disabled", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Disable mouse.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.False(t, m.MouseEnabled())
-		// Type and submit.
-		m.Input.SetValue("hello")
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-		assert.True(t, m.MouseEnabled())
 	})
 }
 
@@ -609,9 +597,11 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 		assert.Empty(t, m.Input.Value())
 	})
 
-	t.Run("SGR mouse body fragment does not reach input", func(t *testing.T) {
+	t.Run("SGR mouse body fragment does not reach input when mouse enabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		// Enable mouse capture.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		// Simulates the body of a split SGR mouse sequence: <64;56;37M
 		m = updateModel(t, m, tea.KeyMsg{
 			Type:  tea.KeyRunes,
@@ -620,9 +610,11 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 		assert.Empty(t, m.Input.Value())
 	})
 
-	t.Run("SGR mouse release fragment does not reach input", func(t *testing.T) {
+	t.Run("SGR mouse release fragment does not reach input when mouse enabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		// Enable mouse capture.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		// SGR release events end with lowercase 'm'.
 		m = updateModel(t, m, tea.KeyMsg{
 			Type:  tea.KeyRunes,
@@ -668,9 +660,11 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 		assert.Equal(t, "<a;b;cM", m.Input.Value())
 	})
 
-	t.Run("minimum valid mouse fragment is filtered", func(t *testing.T) {
+	t.Run("minimum valid mouse fragment is filtered when mouse enabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
+		// Enable mouse capture.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
 		m = updateModel(t, m, tea.KeyMsg{
 			Type:  tea.KeyRunes,
 			Runes: []rune("<0;0;0M"),
@@ -678,11 +672,10 @@ func TestModel_MouseEscapeFilter(t *testing.T) {
 		assert.Empty(t, m.Input.Value())
 	})
 
-	t.Run("mouse fragment ignored only when mouse enabled", func(t *testing.T) {
+	t.Run("mouse fragment passes through when mouse disabled", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Disable mouse.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+		// Mouse disabled by default.
 		require.False(t, m.MouseEnabled())
 		// SGR fragment should pass through when mouse is disabled since
 		// the terminal is not sending mouse events in that mode.

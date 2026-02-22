@@ -74,7 +74,7 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
 		theme:          theme,
 		styles:         NewStyles(theme),
 		blockFocus:     -1,
-		mouseEnabled:   true,
+		mouseEnabled:   false,
 		activeText:     make(map[int]*AssistantTextBlock),
 		activeThinking: make(map[int]*ThinkingBlock),
 		activeToolCall: make(map[string]*ToolCallBlock),
@@ -330,15 +330,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 
 	m.Input.Blur()
 
-	// Re-enable mouse capture so scrolling works during the run.
-	var mouseCmd tea.Cmd
-	if !m.mouseEnabled {
-		m.mouseEnabled = true
-		mouseCmd = tea.EnableMouseCellMotion
-	}
-
 	return m, tea.Batch(
-		mouseCmd,
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
 		listenForEvent(m.eventCh, m.doneCh),
 	)
@@ -498,8 +490,8 @@ func (m Model) statusLine() string {
 	if m.running {
 		return m.styles.Muted.Render("Generating...")
 	}
-	if !m.mouseEnabled {
-		return m.styles.Muted.Render("Mouse off (Alt+M to re-enable), Enter to send, Ctrl+C to quit")
+	if m.mouseEnabled {
+		return m.styles.Muted.Render("Mouse capture on (Alt+M to release), Enter to send, Ctrl+C to quit")
 	}
 	return m.styles.Muted.Render("Enter to send, Ctrl+C to quit")
 }
