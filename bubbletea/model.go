@@ -47,12 +47,13 @@ type Model struct {
 
 	windowHeight int // stored for viewport recomputation on InputHeightMsg
 
-	running bool
-	cancel  context.CancelFunc
-	eventCh chan pipe.Event
-	doneCh  chan error
-	err     error
-	ready   bool
+	mouseEnabled bool
+	running      bool
+	cancel       context.CancelFunc
+	eventCh      chan pipe.Event
+	doneCh       chan error
+	err          error
+	ready        bool
 }
 
 // New creates a new TUI Model with the given agent function, session, and theme.
@@ -73,6 +74,7 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme) Model {
 		theme:          theme,
 		styles:         NewStyles(theme),
 		blockFocus:     -1,
+		mouseEnabled:   true,
 		activeText:     make(map[int]*AssistantTextBlock),
 		activeThinking: make(map[int]*ThinkingBlock),
 		activeToolCall: make(map[string]*ToolCallBlock),
@@ -84,6 +86,9 @@ func (m Model) Running() bool { return m.running }
 
 // Err returns the last error, if any.
 func (m Model) Err() error { return m.err }
+
+// MouseEnabled returns whether mouse capture is active.
+func (m Model) MouseEnabled() bool { return m.mouseEnabled }
 
 // SetRunning is a test helper that puts the model in a running state.
 func SetRunning(m Model) (Model, tea.Cmd) {
@@ -256,6 +261,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// (for scrolling). Only forward non-character keys to viewport to avoid
 	// conflicts (e.g. 'j'/'k' are viewport scroll AND text characters).
 	if !m.running {
+		// Alt+M toggles mouse capture for native text selection.
+		if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 && msg.Runes[0] == 'm' {
+			m.mouseEnabled = !m.mouseEnabled
+			if m.mouseEnabled {
+				return m, tea.EnableMouseCellMotion
+			}
+			return m, tea.DisableMouse
+		}
+
 		var cmd tea.Cmd
 		var cmds []tea.Cmd
 
@@ -303,7 +317,15 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 
 	m.Input.Blur()
 
+	// Re-enable mouse capture so scrolling works during the run.
+	var mouseCmd tea.Cmd
+	if !m.mouseEnabled {
+		m.mouseEnabled = true
+		mouseCmd = tea.EnableMouseCellMotion
+	}
+
 	return m, tea.Batch(
+		mouseCmd,
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
 		listenForEvent(m.eventCh, m.doneCh),
 	)
@@ -462,6 +484,9 @@ func (m Model) statusLine() string {
 	}
 	if m.running {
 		return m.styles.Muted.Render("Generating...")
+	}
+	if !m.mouseEnabled {
+		return m.styles.Muted.Render("Mouse off (Alt+M to re-enable), Enter to send, Ctrl+C to quit")
 	}
 	return m.styles.Muted.Render("Enter to send, Ctrl+C to quit")
 }
