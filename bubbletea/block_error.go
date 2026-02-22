@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 var _ MessageBlock = (*ErrorBlock)(nil)
@@ -25,6 +24,9 @@ func (b *ErrorBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
 }
 
 func (b *ErrorBlock) View(width int) string {
-	content := b.styles.Error.Render(fmt.Sprintf("Error: %v", b.err))
-	return lipgloss.NewStyle().Width(width).Render(content)
+	content := fmt.Sprintf("Error: %v", b.err)
+	return b.styles.ErrorBg.
+		Width(width).
+		PaddingLeft(1).
+		Render(content)
 }
