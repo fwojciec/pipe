@@ -151,7 +151,7 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 		if cfg.onEvent != nil {
 			// Only text content is surfaced in the event; other block
 			// types (e.g. ImageBlock) are silently dropped by design.
-			// If no text blocks exist, the event is skipped entirely.
+			// If no non-empty text blocks exist, the event is skipped.
 			var sb strings.Builder
 			for _, b := range result.Content {
 				if tb, ok := b.(TextBlock); ok && tb.Text != "" {
