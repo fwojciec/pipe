@@ -215,7 +215,7 @@ func TestModel_Update(t *testing.T) {
 		require.Error(t, m.Err())
 
 		// Type and submit.
-		m.Input.SetValue("retry")
+		m.Input = typeInputString(t, m.Input, "retry")
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 
 		assert.True(t, m.Running())
@@ -809,6 +809,9 @@ func TestModel_Teatest(t *testing.T) {
 		t.Parallel()
 
 		var callCount atomic.Int32
+		// The agent mutates session.Messages directly — this mirrors the real
+		// contract where both model (user messages) and agent (assistant messages)
+		// append to the shared session.
 		agent := func(_ context.Context, session *pipe.Session, onEvent func(pipe.Event)) error {
 			n := callCount.Add(1)
 			if n == 1 {
