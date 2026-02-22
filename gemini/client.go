@@ -161,6 +161,9 @@ func convertParts(blocks []pipe.ContentBlock) ([]*genai.Part, error) {
 	var parts []*genai.Part
 	// Gemini requires ThoughtSignature on FunctionCall parts that follow
 	// thinking. Track the last signature so tool calls can include it.
+	// lastSig intentionally persists across non-thinking blocks (Text, Image)
+	// because Gemini's thinking always logically precedes the tool calls it
+	// produces, regardless of any intervening content parts.
 	var lastSig []byte
 	for _, b := range blocks {
 		switch bl := b.(type) {
