@@ -144,7 +144,7 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 		}
 		session.Messages = append(session.Messages, trm)
 
-		if result != nil && cfg.onEvent != nil {
+		if cfg.onEvent != nil {
 			// Only text content is surfaced in the event; other block
 			// types (e.g. ImageBlock) are silently dropped by design.
 			// If no text blocks exist, the event is skipped entirely.
