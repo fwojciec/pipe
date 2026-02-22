@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -185,6 +186,60 @@ func TestModel_Update(t *testing.T) {
 		assert.False(t, model.Running())
 		assert.Error(t, model.Err())
 		assert.Contains(t, model.View(), "Error")
+	})
+
+	t.Run("input accepts text after agent error", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		m, _ = bt.SetRunning(m)
+
+		// Agent completes with error.
+		m = updateModel(t, m, bt.AgentDoneMsg{Err: assert.AnError})
+		require.Error(t, m.Err())
+		require.False(t, m.Running())
+
+		// Type into input — should work since input was re-focused.
+		m.Input = typeInputString(t, m.Input, "retry")
+		assert.Equal(t, "retry", m.Input.Value())
+	})
+
+	t.Run("submit after error clears error and starts new run", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		m, _ = bt.SetRunning(m)
+
+		// Agent completes with error.
+		m = updateModel(t, m, bt.AgentDoneMsg{Err: assert.AnError})
+		require.Error(t, m.Err())
+
+		// Type and submit.
+		m.Input.SetValue("retry")
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+		assert.True(t, m.Running())
+		assert.NoError(t, m.Err())
+		assert.Contains(t, m.View(), "retry")
+	})
+
+	t.Run("ctrl+c quits after agent error", func(t *testing.T) {
+		t.Parallel()
+
+		m := initModel(t, nopAgent)
+		m, _ = bt.SetRunning(m)
+
+		// Agent completes with error.
+		m = updateModel(t, m, bt.AgentDoneMsg{Err: assert.AnError})
+		require.Error(t, m.Err())
+		require.False(t, m.Running())
+
+		// Ctrl+C should quit (not just cancel).
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		require.NotNil(t, cmd)
+		msg := cmd()
+		_, isQuit := msg.(tea.QuitMsg)
+		assert.True(t, isQuit)
 	})
 
 	t.Run("agent done with long error wraps to viewport width", func(t *testing.T) {
@@ -748,5 +803,58 @@ func TestModel_Teatest(t *testing.T) {
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
 		tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+	})
+
+	t.Run("conversation continues after agent error", func(t *testing.T) {
+		t.Parallel()
+
+		var callCount atomic.Int32
+		agent := func(_ context.Context, session *pipe.Session, onEvent func(pipe.Event)) error {
+			n := callCount.Add(1)
+			if n == 1 {
+				return fmt.Errorf("simulated API error")
+			}
+			onEvent(pipe.EventTextDelta{Index: 0, Delta: "recovered"})
+			session.Messages = append(session.Messages, pipe.AssistantMessage{
+				Content:    []pipe.ContentBlock{pipe.TextBlock{Text: "recovered"}},
+				StopReason: pipe.StopEndTurn,
+			})
+			return nil
+		}
+
+		session := &pipe.Session{}
+		theme := pipe.DefaultTheme()
+		m := bt.New(agent, session, theme)
+
+		tm := teatest.NewTestModel(t, m,
+			teatest.WithInitialTermSize(80, 24),
+		)
+
+		// First message triggers error.
+		tm.Type("hello")
+		tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("Error")) &&
+				bytes.Contains(out, []byte("simulated API error"))
+		}, teatest.WithDuration(5*time.Second))
+
+		// Second message should succeed — conversation continues.
+		tm.Type("retry")
+		tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte("recovered")) &&
+				bytes.Contains(out, []byte("Enter to send"))
+		}, teatest.WithDuration(5*time.Second))
+
+		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+		fm := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second))
+		final, ok := fm.(bt.Model)
+		require.True(t, ok)
+		assert.False(t, final.Running())
+		assert.NoError(t, final.Err())
+		assert.Equal(t, int32(2), callCount.Load())
 	})
 }
