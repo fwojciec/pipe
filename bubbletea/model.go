@@ -456,7 +456,7 @@ func (m Model) updateBlockFocus() Model {
 	m.blockFocus = -1
 	for i := len(m.blocks) - 1; i >= 0; i-- {
 		switch m.blocks[i].(type) {
-		case *ThinkingBlock, *ToolCallBlock:
+		case *ThinkingBlock, *ToolCallBlock, *ToolResultBlock:
 			m.blockFocus = i
 			return m
 		}
@@ -473,7 +473,7 @@ func (m Model) cycleFocusPrev() Model {
 	for i := range len(m.blocks) {
 		idx := (start - i + len(m.blocks)) % len(m.blocks)
 		switch m.blocks[idx].(type) {
-		case *ThinkingBlock, *ToolCallBlock:
+		case *ThinkingBlock, *ToolCallBlock, *ToolResultBlock:
 			m.blockFocus = idx
 			return m
 		}

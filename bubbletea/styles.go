@@ -36,7 +36,7 @@ func NewStyles(t pipe.Theme) Styles {
 		CodeBg:       lipgloss.NewStyle().Background(ansiColor(t.CodeBg)),
 		UserBg:       lipgloss.NewStyle().Background(ansiColor(t.UserBg)),
 		ToolCallBg:   lipgloss.NewStyle().Background(ansiColor(t.ToolCallBg)).PaddingLeft(1),
-		ToolResultBg: lipgloss.NewStyle().Background(ansiColor(t.ToolResultBg)),
+		ToolResultBg: lipgloss.NewStyle().Background(ansiColor(t.ToolResultBg)).PaddingLeft(1),
 		ErrorBg:      lipgloss.NewStyle().Background(ansiColor(t.ErrorBg)),
 	}
 }
