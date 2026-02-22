@@ -35,10 +35,10 @@ func TestNewStyles(t *testing.T) {
 
 	assert.Equal(t, lipgloss.Color("0"), styles.CodeBg.GetBackground())
 
-	assert.Equal(t, lipgloss.Color("4"), styles.UserBg.GetBackground())
-	assert.Equal(t, lipgloss.Color("3"), styles.ToolCallBg.GetBackground())
-	assert.Equal(t, lipgloss.Color("8"), styles.ToolResultBg.GetBackground())
-	assert.Equal(t, lipgloss.Color("1"), styles.ErrorBg.GetBackground())
+	assert.Equal(t, lipgloss.Color("234"), styles.UserBg.GetBackground())
+	assert.Equal(t, lipgloss.Color("235"), styles.ToolCallBg.GetBackground())
+	assert.Equal(t, lipgloss.Color("236"), styles.ToolResultBg.GetBackground())
+	assert.Equal(t, lipgloss.Color("52"), styles.ErrorBg.GetBackground())
 }
 
 func TestNewStylesNegativeIndexYieldsNoColor(t *testing.T) {

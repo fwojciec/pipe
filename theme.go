@@ -1,8 +1,9 @@
 package pipe
 
-// Theme defines semantic color mappings using ANSI color indices (0-15).
-// The user's terminal theme determines the actual RGB values, so the app
-// automatically matches any color scheme.
+// Theme defines semantic color mappings using ANSI color indices.
+// Foreground colors use indices 0-15 so the user's terminal theme determines
+// the actual RGB values. Background colors use ANSI 256 indices (e.g. 234-237
+// for subtle dark tints) to avoid colliding with foreground colors.
 type Theme struct {
 	UserMsg      int // User message accent
 	Thinking     int // Thinking block text
@@ -29,9 +30,9 @@ func DefaultTheme() Theme {
 		Muted:        8,
 		CodeBg:       0,
 		Accent:       5,
-		UserBg:       4,
-		ToolCallBg:   3,
-		ToolResultBg: 8,
-		ErrorBg:      1,
+		UserBg:       234,
+		ToolCallBg:   235,
+		ToolResultBg: 236,
+		ErrorBg:      52,
 	}
 }

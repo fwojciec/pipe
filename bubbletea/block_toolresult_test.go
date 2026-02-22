@@ -22,7 +22,8 @@ func TestToolResultBlock_View(t *testing.T) {
 		assert.Contains(t, view, "read")
 		assert.Contains(t, view, "✓")
 		assert.Contains(t, view, "file contents here")
-		// Collapsed: content should be on same line as header (summary preview).
+		// Collapsed: shows ▶ indicator (not ▼).
+		assert.Contains(t, view, "▶")
 		assert.NotContains(t, view, "▼")
 	})
 
@@ -112,12 +113,15 @@ func TestToolResultBlock_View(t *testing.T) {
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewToolResultBlock("read", "some content", false, styles)
 		view := block.View(40)
+		var checked int
 		for _, line := range strings.Split(view, "\n") {
 			if line == "" {
 				continue
 			}
+			checked++
 			assert.Equal(t, 40, lipgloss.Width(line))
 		}
+		assert.Greater(t, checked, 0, "expected at least one non-empty line")
 	})
 
 	t.Run("pads expanded view to full width", func(t *testing.T) {
@@ -125,12 +129,15 @@ func TestToolResultBlock_View(t *testing.T) {
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewToolResultBlock("bash", "error output", true, styles)
 		view := block.View(40)
+		var checked int
 		for _, line := range strings.Split(view, "\n") {
 			if line == "" {
 				continue
 			}
+			checked++
 			assert.Equal(t, 40, lipgloss.Width(line))
 		}
+		assert.Greater(t, checked, 0, "expected at least one non-empty line")
 	})
 
 	t.Run("has 1-space left padding", func(t *testing.T) {

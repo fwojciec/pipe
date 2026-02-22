@@ -95,7 +95,15 @@ func TestModel_BlockSpacing(t *testing.T) {
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "output", IsError: false}})
 
 		content := bt.RenderContent(m)
-		assert.NotContains(t, content, "\n\n")
+		assert.NotEmpty(t, content, "expected non-empty rendered content")
+		// Check separators between blocks only (not within block views).
+		lines := strings.Split(content, "\n")
+		for i := 0; i+1 < len(lines); i++ {
+			if lines[i] == "" && lines[i+1] == "" {
+				t.Errorf("found consecutive blank lines at line %d in:\n%s", i, content)
+				break
+			}
+		}
 	})
 
 	t.Run("text then tool has blank line", func(t *testing.T) {

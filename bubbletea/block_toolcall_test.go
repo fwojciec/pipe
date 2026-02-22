@@ -106,12 +106,15 @@ func TestToolCallBlock_View(t *testing.T) {
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewToolCallBlock("read", "tc-1", styles)
 		view := block.View(40)
+		var checked int
 		for _, line := range strings.Split(view, "\n") {
 			if line == "" {
 				continue
 			}
+			checked++
 			assert.Equal(t, 40, lipgloss.Width(line))
 		}
+		assert.Greater(t, checked, 0, "expected at least one non-empty line")
 	})
 
 	t.Run("pads expanded view to full width", func(t *testing.T) {
@@ -121,12 +124,15 @@ func TestToolCallBlock_View(t *testing.T) {
 		block.AppendArgs(`{"path": "/tmp/foo"}`)
 		updated, _ := block.Update(bt.ToggleMsg{})
 		view := updated.(*bt.ToolCallBlock).View(40)
+		var checked int
 		for _, line := range strings.Split(view, "\n") {
 			if line == "" {
 				continue
 			}
+			checked++
 			assert.Equal(t, 40, lipgloss.Width(line))
 		}
+		assert.Greater(t, checked, 0, "expected at least one non-empty line")
 	})
 
 	t.Run("has 1-space left padding", func(t *testing.T) {

@@ -192,7 +192,9 @@ func gitBranch() string {
 	if !found {
 		return ""
 	}
-	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return ""
 	}

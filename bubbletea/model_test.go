@@ -743,7 +743,7 @@ func TestModel_StatusBar(t *testing.T) {
 		assert.NotContains(t, view, "●")
 	})
 
-	t.Run("narrow terminal does not panic", func(t *testing.T) {
+	t.Run("narrow terminal does not panic and fits width", func(t *testing.T) {
 		t.Parallel()
 		session := &pipe.Session{}
 		theme := pipe.DefaultTheme()
@@ -755,7 +755,11 @@ func TestModel_StatusBar(t *testing.T) {
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
 		model, ok := updated.(bt.Model)
 		require.True(t, ok)
-		assert.NotPanics(t, func() { model.View() })
+		var view string
+		assert.NotPanics(t, func() { view = model.View() })
+		for _, line := range strings.Split(view, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(line), 20, "line exceeds viewport width: %q", line)
+		}
 	})
 }
 
@@ -780,10 +784,14 @@ func TestModel_WelcomeScreen(t *testing.T) {
 		assert.NotContains(t, m.View(), "Ceci n'est pas une pipe.")
 	})
 
-	t.Run("small viewport does not panic", func(t *testing.T) {
+	t.Run("small viewport does not panic and fits width", func(t *testing.T) {
 		t.Parallel()
 		m := initModelWithSize(t, nopAgent, 10, 5)
-		assert.NotPanics(t, func() { m.View() })
+		var view string
+		assert.NotPanics(t, func() { view = m.View() })
+		for _, line := range strings.Split(view, "\n") {
+			assert.LessOrEqual(t, lipgloss.Width(line), 10, "line exceeds viewport width: %q", line)
+		}
 	})
 
 	t.Run("session with messages shows no welcome", func(t *testing.T) {

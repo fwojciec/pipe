@@ -29,12 +29,15 @@ func TestErrorBlock_View(t *testing.T) {
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewErrorBlock(errors.New("fail"), styles)
 		view := block.View(40)
+		var checked int
 		for _, line := range strings.Split(view, "\n") {
 			if line == "" {
 				continue
 			}
+			checked++
 			assert.Equal(t, 40, lipgloss.Width(line))
 		}
+		assert.Greater(t, checked, 0, "expected at least one non-empty line")
 	})
 
 	t.Run("has 1-space left padding", func(t *testing.T) {

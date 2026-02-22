@@ -27,6 +27,5 @@ func (b *ErrorBlock) View(width int) string {
 	content := fmt.Sprintf("Error: %v", b.err)
 	return b.styles.ErrorBg.
 		Width(width).
-		PaddingLeft(1).
 		Render(content)
 }

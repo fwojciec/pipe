@@ -23,6 +23,5 @@ func (b *UserMessageBlock) View(width int) string {
 	content := b.styles.UserMsg.Render(b.text)
 	return b.styles.UserBg.
 		Width(width).
-		PaddingLeft(1).
 		Render(content)
 }

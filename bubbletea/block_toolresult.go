@@ -51,7 +51,7 @@ func (b *ToolResultBlock) View(width int) string {
 }
 
 func (b *ToolResultBlock) viewCollapsed(width int, statusIcon string) string {
-	header := b.styles.ToolCall.Render(b.toolName + " " + statusIcon)
+	header := b.styles.ToolCall.Render("▶ " + b.toolName + " " + statusIcon)
 	if b.content != "" {
 		preview := firstLine(b.content)
 		runes := []rune(preview)
