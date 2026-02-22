@@ -1062,29 +1062,45 @@ func TestBlockSeparator(t *testing.T) {
 }
 ```
 
-**Step 3: Write integration test for block presence**
+**Step 3: Write integration test bridging separator logic to renderContent**
 
-Keep a simple smoke test that verifies blocks appear — no spacing assertions:
+Expose `renderContent` via `export_test.go` and compare two scenarios:
+tool-only blocks (no `\n\n`) vs mixed blocks (has `\n\n`). Both use short,
+single-line content so internal `\n\n` from block renderers is impossible.
+
+Add to `bubbletea/export_test.go`:
+
+```go
+// RenderContent exposes renderContent for testing block spacing integration.
+func (m Model) RenderContent() string { return m.renderContent() }
+```
 
 ```go
 func TestModel_BlockSpacing(t *testing.T) {
 	t.Parallel()
 
-	t.Run("multi-tool cluster renders all blocks", func(t *testing.T) {
+	t.Run("tool-only sequence has no blank lines", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "before"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-2", Name: "bash"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-2", Name: "bash"}}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "data", IsError: false}})
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "done", IsError: false}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "ok", IsError: false}})
 
-		view := m.Viewport.View()
-		assert.Contains(t, view, "before")
-		assert.Contains(t, view, "read")
-		assert.Contains(t, view, "bash")
+		raw := m.RenderContent()
+		assert.NotContains(t, raw, "\n\n",
+			"tool cluster should have no blank lines, got:\n%s", raw)
+	})
+
+	t.Run("text-to-tool boundary has blank line", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hi"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+
+		raw := m.RenderContent()
+		assert.Contains(t, raw, "\n\n",
+			"text→tool boundary should have blank line, got:\n%s", raw)
 	})
 }
 ```
