@@ -129,8 +129,12 @@ func (l *Loop) turn(ctx context.Context, session *Session, tools []Tool, cfg *ru
 	for _, tc := range toolCalls {
 		result, execErr := l.executor.Execute(ctx, tc.Name, tc.Arguments)
 		if execErr != nil || result == nil {
+			msg := "tool returned no result"
+			if execErr != nil {
+				msg = execErr.Error()
+			}
 			result = &ToolResult{
-				Content: []ContentBlock{TextBlock{Text: execErr.Error()}},
+				Content: []ContentBlock{TextBlock{Text: msg}},
 				IsError: true,
 			}
 		}
