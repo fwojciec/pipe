@@ -1083,7 +1083,10 @@ func (m Model) RenderContent() string { return m.renderContent() }
 func TestModel_BlockSpacing(t *testing.T) {
 	t.Parallel()
 
-	const toolContent = "ok"
+	const (
+		textContent = "hi"
+		toolContent = "ok"
+	)
 
 	t.Run("tool-only sequence has no blank lines", func(t *testing.T) {
 		t.Parallel()
@@ -1106,12 +1109,15 @@ func TestModel_BlockSpacing(t *testing.T) {
 	t.Run("text-to-tool boundary has blank line", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: "hi"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Delta: textContent}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: toolContent, IsError: false}})
 
 		raw := m.RenderContent()
+		require.NotContains(t, textContent, "\n\n", "test data must be single-line")
+		// strings.Count relies on renderers not appending trailing blank lines;
+		// the single-line test data above ensures any "\n\n" is a separator.
 		assert.Equal(t, 1, strings.Count(raw, "\n\n"),
 			"expected exactly one blank line at text→tool boundary, got:\n%s", raw)
 	})
