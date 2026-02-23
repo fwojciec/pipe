@@ -164,8 +164,11 @@ func workDir() string {
 	if err != nil {
 		return dir
 	}
-	if rel, ok := strings.CutPrefix(dir, home); ok {
-		return "~" + rel
+	if rel, ok := strings.CutPrefix(dir, home+string(os.PathSeparator)); ok {
+		return "~/" + rel
+	}
+	if dir == home {
+		return "~"
 	}
 	return dir
 }

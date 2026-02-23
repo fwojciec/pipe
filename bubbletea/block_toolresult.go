@@ -51,7 +51,11 @@ func (b *ToolResultBlock) View(width int) string {
 }
 
 func (b *ToolResultBlock) viewCollapsed(width int, statusIcon string) string {
-	header := b.styles.ToolCall.Render("▶ " + b.toolName + " " + statusIcon)
+	iconStyle := b.styles.Success
+	if b.isError {
+		iconStyle = b.styles.Error
+	}
+	header := b.styles.ToolCall.Render("▶ "+b.toolName) + " " + iconStyle.Render(statusIcon)
 	if b.content != "" {
 		preview := firstLine(b.content)
 		runes := []rune(preview)
@@ -70,7 +74,11 @@ func (b *ToolResultBlock) viewCollapsed(width int, statusIcon string) string {
 }
 
 func (b *ToolResultBlock) viewExpanded(width int, statusIcon string) string {
-	header := b.styles.ToolCall.Render("▼ " + b.toolName + " " + statusIcon)
+	iconStyle := b.styles.Success
+	if b.isError {
+		iconStyle = b.styles.Error
+	}
+	header := b.styles.ToolCall.Render("▼ "+b.toolName) + " " + iconStyle.Render(statusIcon)
 	content := header
 	if b.content != "" {
 		rendered := b.content

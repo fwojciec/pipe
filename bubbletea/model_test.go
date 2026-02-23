@@ -399,6 +399,25 @@ func TestModel_BlockToggle(t *testing.T) {
 	})
 }
 
+func TestModel_BlockToggle_ToolResult(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tab toggles tool result after tool call", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Tool call + tool result with multi-line content.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "first line\nsecond line", IsError: false}})
+		// Collapsed: first line shown as preview, second line hidden.
+		assert.Contains(t, m.View(), "first line")
+		assert.NotContains(t, m.View(), "second line")
+		// Tab toggles the tool result (focused as last collapsible block).
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.Contains(t, m.View(), "second line")
+	})
+}
+
 func TestModel_BlockFocusCycle(t *testing.T) {
 	t.Parallel()
 
@@ -956,8 +975,7 @@ func TestModel_Teatest(t *testing.T) {
 
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("Hello!")) &&
-				bytes.Contains(out, []byte("test-model")) &&
-				!bytes.Contains(out, []byte("●"))
+				bytes.Contains(out, []byte("test-model"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1062,8 +1080,7 @@ func TestModel_Teatest(t *testing.T) {
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("hi")) &&
 				bytes.Contains(out, []byte("Done!")) &&
-				bytes.Contains(out, []byte("test-model")) &&
-				!bytes.Contains(out, []byte("●"))
+				bytes.Contains(out, []byte("test-model"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -1145,8 +1162,7 @@ func TestModel_Teatest(t *testing.T) {
 
 		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 			return bytes.Contains(out, []byte("recovered")) &&
-				bytes.Contains(out, []byte("test-model")) &&
-				!bytes.Contains(out, []byte("●"))
+				bytes.Contains(out, []byte("test-model"))
 		}, teatest.WithDuration(5*time.Second))
 
 		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

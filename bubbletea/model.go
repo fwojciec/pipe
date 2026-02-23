@@ -479,6 +479,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		}
 	case pipe.EventToolResult:
 		m.blocks = append(m.blocks, NewToolResultBlock(e.ToolName, e.Content, e.IsError, m.styles))
+		m = m.updateBlockFocus()
 	}
 	return m
 }
