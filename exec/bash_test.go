@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -203,6 +204,7 @@ func TestBashExecutor(t *testing.T) {
 		require.NotEmpty(t, matches, "should contain pid")
 		pid, err := strconv.Atoi(matches[1])
 		require.NoError(t, err)
+		t.Cleanup(func() { syscall.Kill(-pid, syscall.SIGKILL) })
 
 		killResult, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
 			"kill_pid": pid,
