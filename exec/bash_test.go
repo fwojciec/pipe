@@ -104,9 +104,9 @@ func TestBashExecutor(t *testing.T) {
 				path := strings.TrimSpace(strings.Split(line, "Full output:")[1])
 				path = strings.TrimSuffix(path, "]")
 				path = strings.TrimSpace(path)
+				t.Cleanup(func() { os.Remove(path) })
 				_, statErr := os.Stat(path)
 				assert.NoError(t, statErr, "temp file should exist")
-				os.Remove(path)
 				found = true
 				break
 			}
