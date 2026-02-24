@@ -97,21 +97,26 @@ func TestBackgroundExecution(t *testing.T) {
 		t.Parallel()
 		e := pipeexec.NewBashExecutor()
 
-		// Start a fast command with very short timeout so it backgrounds.
+		// sleep 0.1 (100ms) with 1ms timeout — reliably backgrounds,
+		// then completes quickly so we can test the completed-process path.
 		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "echo done",
+			"command": "sleep 0.1",
 			"timeout": 1,
 		}))
 		require.NoError(t, err)
 		text := resultText(t, result)
-
-		if !strings.Contains(text, "backgrounded") {
-			t.Skip("command completed before timeout")
-		}
+		require.Contains(t, text, "backgrounded")
 
 		pid := extractPID(t, text)
-		// Wait for the process to finish.
-		time.Sleep(500 * time.Millisecond)
+
+		// Wait deterministically for the process to complete.
+		ch := e.WaitBackground(pid)
+		require.NotNil(t, ch)
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for background process to complete")
+		}
 
 		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
 			"check_pid": pid,
@@ -133,21 +138,26 @@ func TestBackgroundExecution(t *testing.T) {
 		t.Parallel()
 		e := pipeexec.NewBashExecutor()
 
-		// Start a fast command with very short timeout so it backgrounds.
+		// sleep 0.1 (100ms) with 1ms timeout — reliably backgrounds,
+		// then completes quickly so we can test the already-exited path.
 		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "echo done",
+			"command": "sleep 0.1",
 			"timeout": 1,
 		}))
 		require.NoError(t, err)
 		text := resultText(t, result)
-
-		if !strings.Contains(text, "backgrounded") {
-			t.Skip("command completed before timeout")
-		}
+		require.Contains(t, text, "backgrounded")
 
 		pid := extractPID(t, text)
-		// Wait for the process to finish.
-		time.Sleep(500 * time.Millisecond)
+
+		// Wait deterministically for the process to complete.
+		ch := e.WaitBackground(pid)
+		require.NotNil(t, ch)
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for background process to complete")
+		}
 
 		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
 			"kill_pid": pid,

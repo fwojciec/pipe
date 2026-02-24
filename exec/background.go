@@ -20,6 +20,7 @@ type BackgroundProcess struct {
 	waitCh     <-chan error
 	stdoutDone <-chan struct{}
 	stderrDone <-chan struct{}
+	doneCh     chan struct{} // closed by watch() when process completes
 
 	mu       sync.Mutex
 	done     bool
@@ -36,7 +37,6 @@ func (bp *BackgroundProcess) watch() {
 	bp.stderr.Close()
 
 	bp.mu.Lock()
-	defer bp.mu.Unlock()
 	bp.done = true
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*osexec.ExitError); ok {
@@ -45,6 +45,8 @@ func (bp *BackgroundProcess) watch() {
 			bp.exitCode = -1
 		}
 	}
+	bp.mu.Unlock()
+	close(bp.doneCh)
 }
 
 // BackgroundRegistry tracks auto-backgrounded processes.
@@ -63,6 +65,18 @@ func (r *BackgroundRegistry) Register(pid int, bp *BackgroundProcess) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.processes[pid] = bp
+}
+
+// Done returns a channel that is closed when the background process with the
+// given pid completes. Returns nil if no process with that pid is tracked.
+func (r *BackgroundRegistry) Done(pid int) <-chan struct{} {
+	r.mu.Lock()
+	bp, ok := r.processes[pid]
+	r.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return bp.doneCh
 }
 
 // Check returns the current status and output of a background process.
@@ -129,23 +143,10 @@ func (r *BackgroundRegistry) Kill(pid int) (*pipe.ToolResult, error) {
 
 	if !done {
 		_ = syscall.Kill(-bp.cmd.Process.Pid, syscall.SIGKILL)
-		// Wait for watch goroutine to finish with bounded timeout.
-		deadline := time.NewTimer(5 * time.Second)
-		defer deadline.Stop()
-		tick := time.NewTicker(10 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			bp.mu.Lock()
-			if bp.done {
-				bp.mu.Unlock()
-				break
-			}
-			bp.mu.Unlock()
-			select {
-			case <-deadline.C:
-				return domainError(fmt.Sprintf("timeout waiting for process %d to exit after kill", pid)), nil
-			case <-tick.C:
-			}
+		select {
+		case <-bp.doneCh:
+		case <-time.After(5 * time.Second):
+			return domainError(fmt.Sprintf("timeout waiting for process %d to exit after kill", pid)), nil
 		}
 	}
 
