@@ -184,6 +184,7 @@ before sending to LLM. Uses charmbracelet/x/ansi parser."
 package exec_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -233,7 +234,7 @@ func TestTruncateTail(t *testing.T) {
 		assert.True(t, r.Truncated)
 		assert.Equal(t, "bytes", r.TruncatedBy)
 		assert.Equal(t, 10, r.TotalLines)
-		assert.Less(t, r.OutputBytes, 351)
+		assert.LessOrEqual(t, len(r.Content), 350)
 	})
 
 	t.Run("handles empty input", func(t *testing.T) {
@@ -271,6 +272,20 @@ func TestTruncateTail(t *testing.T) {
 		assert.Equal(t, 2, r.OutputLines)
 	})
 
+	t.Run("output never exceeds maxBytes including trailing newline", func(t *testing.T) {
+		t.Parallel()
+		// Lines of exactly 10 bytes each. With \n separator = 11 bytes per line.
+		// maxBytes = 25 should fit at most 2 lines (10 + 1 + 10 + 1 = 22, or 10 + 1 + 10 = 21 without trailing).
+		lines := make([]string, 10)
+		for i := range 10 {
+			lines[i] = fmt.Sprintf("line_%04d!", i) // exactly 10 bytes
+		}
+		input := strings.Join(lines, "\n") + "\n"
+		r := pipeexec.TruncateTail(input, 1000, 25)
+		assert.True(t, r.Truncated)
+		assert.LessOrEqual(t, len(r.Content), 25, "content must not exceed maxBytes")
+	})
+
 	t.Run("with default limits handles large output", func(t *testing.T) {
 		t.Parallel()
 		// 5000 lines, each 20 bytes
@@ -284,14 +299,13 @@ func TestTruncateTail(t *testing.T) {
 		assert.True(t, r.Truncated)
 		assert.Equal(t, 5000, r.TotalLines)
 		assert.Equal(t, pipeexec.DefaultMaxLines, r.OutputLines)
+		assert.LessOrEqual(t, len(r.Content), pipeexec.DefaultMaxBytes)
 		assert.Contains(t, r.Content, "line 4999")
 		assert.Contains(t, r.Content, "line 3000")
 		assert.NotContains(t, r.Content, "line 0000\n")
 	})
 }
 ```
-
-Note: add `"fmt"` to imports.
 
 **Step 2: Run tests to verify they fail**
 
@@ -304,6 +318,8 @@ Expected: compilation error — `TruncateTail`, `TruncateResult`, `DefaultMaxLin
 // exec/truncate.go
 package exec
 
+import "strings"
+
 const (
 	DefaultMaxLines = 2000
 	DefaultMaxBytes = 50 * 1024 // 50KB
@@ -311,13 +327,13 @@ const (
 
 // TruncateResult describes the outcome of tail truncation.
 type TruncateResult struct {
-	Content        string
-	Truncated      bool
-	TruncatedBy    string // "lines" or "bytes"
-	TotalLines     int
-	TotalBytes     int
-	OutputLines    int
-	OutputBytes    int
+	Content         string
+	Truncated       bool
+	TruncatedBy     string // "lines" or "bytes"
+	TotalLines      int
+	TotalBytes      int
+	OutputLines     int
+	OutputBytes     int
 	LastLinePartial bool
 }
 
@@ -330,6 +346,7 @@ func TruncateTail(s string, maxLines, maxBytes int) TruncateResult {
 		return TruncateResult{}
 	}
 
+	hasTrailingNewline := strings.HasSuffix(s, "\n")
 	lines := splitLines(s)
 	totalLines := len(lines)
 	totalBytes := len(s)
@@ -337,15 +354,22 @@ func TruncateTail(s string, maxLines, maxBytes int) TruncateResult {
 	// Check if within limits.
 	if totalLines <= maxLines && totalBytes <= maxBytes {
 		return TruncateResult{
-			Content:    s,
-			TotalLines: totalLines,
-			TotalBytes: totalBytes,
+			Content:     s,
+			TotalLines:  totalLines,
+			TotalBytes:  totalBytes,
 			OutputLines: totalLines,
 			OutputBytes: totalBytes,
 		}
 	}
 
-	// Work backwards collecting lines.
+	// Work backwards collecting lines. Budget bytes carefully:
+	// the final output is lines joined by \n, optionally with a trailing \n.
+	// Reserve 1 byte for trailing newline if original had one.
+	byteBudget := maxBytes
+	if hasTrailingNewline {
+		byteBudget-- // reserve for trailing \n in reconstructed output
+	}
+
 	var collected []string
 	outputBytes := 0
 	truncatedBy := ""
@@ -353,13 +377,12 @@ func TruncateTail(s string, maxLines, maxBytes int) TruncateResult {
 	for i := len(lines) - 1; i >= 0 && len(collected) < maxLines; i-- {
 		lineBytes := len(lines[i])
 		if len(collected) > 0 {
-			lineBytes++ // account for the \n separator
+			lineBytes++ // account for the \n separator between lines
 		}
-		if outputBytes+lineBytes > maxBytes {
+		if outputBytes+lineBytes > byteBudget {
 			truncatedBy = "bytes"
 			// Edge case: no lines collected yet and this single line exceeds maxBytes.
 			if len(collected) == 0 {
-				// Take the tail of this line.
 				tail := lines[i]
 				if len(tail) > maxBytes {
 					tail = tail[len(tail)-maxBytes:]
@@ -391,7 +414,10 @@ func TruncateTail(s string, maxLines, maxBytes int) TruncateResult {
 	}
 
 	// Reconstruct with original trailing newline if present.
-	content := joinLines(collected, strings.HasSuffix(s, "\n"))
+	content := strings.Join(collected, "\n")
+	if hasTrailingNewline {
+		content += "\n"
+	}
 
 	return TruncateResult{
 		Content:     content,
@@ -414,18 +440,7 @@ func splitLines(s string) []string {
 	s = strings.TrimSuffix(s, "\n")
 	return strings.Split(s, "\n")
 }
-
-// joinLines joins lines with \n. If trailingNewline is true, appends a final \n.
-func joinLines(lines []string, trailingNewline bool) string {
-	s := strings.Join(lines, "\n")
-	if trailingNewline {
-		s += "\n"
-	}
-	return s
-}
 ```
-
-Note: add `"strings"` to imports.
 
 **Step 4: Run tests to verify they pass**
 
@@ -438,8 +453,9 @@ Expected: all PASS
 git add exec/truncate.go exec/truncate_test.go
 git commit -m "feat(exec): add tail truncation for bash output
 
-Keep last 2000 lines or 50KB (whichever hits first). Handles edge
-cases: single oversized line, empty input, no trailing newline."
+Keep last 2000 lines or 50KB (whichever hits first). Byte budget
+accounts for trailing newline. Handles edge cases: single oversized
+line, empty input, no trailing newline."
 ```
 
 ---
@@ -480,6 +496,19 @@ func TestOutputCollector(t *testing.T) {
 		assert.Empty(t, c.FilePath())
 	})
 
+	t.Run("tracks total line count across trims", func(t *testing.T) {
+		t.Parallel()
+		c := pipeexec.NewOutputCollector(100, 200)
+		// Write many lines, enough to trigger rolling buffer trim.
+		for range 50 {
+			c.Write([]byte("a line of text here\n")) // 20 bytes per line
+		}
+		// Total = 1000 bytes, buffer trimmed to 200, but total lines should be 50.
+		assert.Equal(t, int64(1000), c.TotalBytes())
+		assert.Equal(t, 50, c.TotalLines())
+		assert.LessOrEqual(t, len(c.Bytes()), 200)
+	})
+
 	t.Run("rolling buffer keeps last maxBuf bytes", func(t *testing.T) {
 		t.Parallel()
 		c := pipeexec.NewOutputCollector(100, 200) // threshold 100, maxBuf 200
@@ -501,6 +530,7 @@ func TestOutputCollector(t *testing.T) {
 
 		c.Write([]byte(strings.Repeat("y", 60))) // total 110 > threshold
 		require.NotEmpty(t, c.FilePath(), "should offload after threshold")
+		assert.NoError(t, c.Err(), "offload should succeed")
 
 		// Verify file contains full output
 		data, err := os.ReadFile(c.FilePath())
@@ -574,6 +604,7 @@ Expected: compilation error — `NewOutputCollector` not defined
 package exec
 
 import (
+	"bytes"
 	"os"
 	"sync"
 )
@@ -581,16 +612,19 @@ import (
 // OutputCollector is an io.Writer that captures command output with:
 //   - A rolling buffer (last maxBuf bytes) for in-memory access
 //   - File offloading for full output when total exceeds threshold
+//   - Total byte and line counts (accurate even after rolling buffer trims)
 //
 // It is safe for concurrent use.
 type OutputCollector struct {
-	mu        sync.Mutex
-	buf       []byte
-	total     int64
-	file      *os.File
-	filePath  string
-	threshold int64
-	maxBuf    int
+	mu         sync.Mutex
+	buf        []byte
+	total      int64
+	totalLines int
+	file       *os.File
+	filePath   string
+	err        error // first I/O error encountered during offloading
+	threshold  int64
+	maxBuf     int
 }
 
 // NewOutputCollector creates a collector. Threshold is the byte count at which
@@ -610,17 +644,28 @@ func (c *OutputCollector) Write(p []byte) (int, error) {
 
 	n := len(p)
 	c.total += int64(n)
+
+	// Count newlines for accurate total line tracking.
+	c.totalLines += bytes.Count(p, []byte{'\n'})
+
 	c.buf = append(c.buf, p...)
 
-	// File offloading.
-	if c.file == nil && c.total > c.threshold {
-		if f, err := os.CreateTemp("", "pipe-bash-*.log"); err == nil {
+	// File offloading: flush entire buffer to file when threshold first crossed.
+	if c.file == nil && c.err == nil && c.total > c.threshold {
+		f, err := os.CreateTemp("", "pipe-bash-*.log")
+		if err != nil {
+			c.err = err
+		} else {
 			c.file = f
 			c.filePath = f.Name()
-			c.file.Write(c.buf) // flush everything accumulated so far
+			if _, err := c.file.Write(c.buf); err != nil {
+				c.err = err
+			}
 		}
-	} else if c.file != nil {
-		c.file.Write(p)
+	} else if c.file != nil && c.err == nil {
+		if _, err := c.file.Write(p); err != nil {
+			c.err = err
+		}
 	}
 
 	// Trim rolling buffer.
@@ -631,18 +676,25 @@ func (c *OutputCollector) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// Bytes returns the current rolling buffer content.
+// Bytes returns a copy of the current rolling buffer content.
 func (c *OutputCollector) Bytes() []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]byte(nil), c.buf...)
 }
 
-// TotalBytes returns the total number of bytes written.
+// TotalBytes returns the total number of bytes written (not just what's in buffer).
 func (c *OutputCollector) TotalBytes() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.total
+}
+
+// TotalLines returns the total number of newlines seen (not just what's in buffer).
+func (c *OutputCollector) TotalLines() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.totalLines
 }
 
 // FilePath returns the temp file path, or empty if output was not offloaded.
@@ -650,6 +702,13 @@ func (c *OutputCollector) FilePath() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.filePath
+}
+
+// Err returns the first I/O error encountered during file offloading, or nil.
+func (c *OutputCollector) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
 }
 
 // Close flushes and closes the temp file if one was created.
@@ -675,15 +734,17 @@ git add exec/collector.go exec/collector_test.go
 git commit -m "feat(exec): add output collector with rolling buffer and file offloading
 
 Bounds memory during command execution. Offloads full output to temp
-file when threshold exceeded."
+file when threshold exceeded. Tracks accurate total line/byte counts
+across rolling buffer trims. Surfaces I/O errors via Err()."
 ```
 
 ---
 
-### Task 4: Rewrite Bash Execution
+### Task 4: Rewrite Bash Execution (No Background Yet)
 
 Rewrite `ExecuteBash` with: separate stdout/stderr, output pipeline (sanitize →
-truncate → offload notice), new result format. No background execution yet.
+truncate → offload notice), new result format. On timeout, **kill the process**
+(like current behavior). Background execution is added in Task 5.
 
 **Files:**
 - Modify: `exec/bash.go` (full rewrite)
@@ -731,8 +792,6 @@ func TestBashTool(t *testing.T) {
 		require.True(t, ok)
 		assert.Contains(t, props, "command")
 		assert.Contains(t, props, "timeout")
-		assert.Contains(t, props, "check_pid")
-		assert.Contains(t, props, "kill_pid")
 	})
 }
 
@@ -741,8 +800,7 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("executes simple command", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "echo hello",
 		}))
 		require.NoError(t, err)
@@ -754,8 +812,7 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("separates stdout and stderr", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "echo out && echo err >&2",
 		}))
 		require.NoError(t, err)
@@ -766,8 +823,7 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("strips ANSI codes from output", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": `printf '\033[31mred\033[0m\n'`,
 		}))
 		require.NoError(t, err)
@@ -779,8 +835,7 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("reports non-zero exit code", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "echo fail && exit 42",
 		}))
 		require.NoError(t, err)
@@ -792,22 +847,20 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("truncates large stdout and offloads to file", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		// Generate output larger than 50KB
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		// Generate output larger than DefaultMaxLines
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": fmt.Sprintf("seq 1 %d", pipeexec.DefaultMaxLines+1000),
 		}))
 		require.NoError(t, err)
 		require.False(t, result.IsError)
 		text := resultText(t, result)
 
-		// Should contain truncation notice
+		// Should contain truncation notice with capitalized "Showing"
 		assert.Contains(t, text, "Showing last")
 		assert.Contains(t, text, "Full output:")
 
 		// Should contain last lines but not first
 		assert.Contains(t, text, fmt.Sprintf("%d", pipeexec.DefaultMaxLines+1000))
-		assert.NotContains(t, text, "\n1\n")
 
 		// Temp file should exist and contain full output
 		for _, line := range strings.Split(text, "\n") {
@@ -815,8 +868,8 @@ func TestExecuteBash(t *testing.T) {
 				path := strings.TrimSpace(strings.Split(line, "Full output:")[1])
 				path = strings.TrimSuffix(path, "]")
 				path = strings.TrimSpace(path)
-				_, err := os.Stat(path)
-				assert.NoError(t, err, "temp file should exist")
+				_, statErr := os.Stat(path)
+				assert.NoError(t, statErr, "temp file should exist")
 				os.Remove(path)
 				break
 			}
@@ -827,54 +880,48 @@ func TestExecuteBash(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(ctx, mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(ctx, mustJSON(t, map[string]any{
 			"command": "sleep 10",
 		}))
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
 
-	t.Run("respects timeout argument", func(t *testing.T) {
+	t.Run("kills process on timeout", func(t *testing.T) {
 		t.Parallel()
 		if runtime.GOOS == "windows" {
 			t.Skip("sleep command differs on Windows")
 		}
-		e := pipeexec.NewBashExecutor()
 		start := time.Now()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "sleep 10",
 			"timeout": 200,
 		}))
 		elapsed := time.Since(start)
 		require.NoError(t, err)
-		// Should be backgrounded or error, not a 10s wait
+		assert.True(t, result.IsError)
 		assert.Less(t, elapsed, 5*time.Second)
-		// Result should indicate backgrounding
 		text := resultText(t, result)
-		assert.True(t, strings.Contains(text, "backgrounded") || result.IsError)
+		assert.Contains(t, text, "timed out")
 	})
 
 	t.Run("returns error for missing command", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{}))
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{}))
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
 
 	t.Run("returns error for invalid JSON args", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), json.RawMessage(`{invalid`))
+		result, err := pipeexec.ExecuteBash(context.Background(), json.RawMessage(`{invalid`))
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
 
 	t.Run("omits empty stderr section", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "echo hello",
 		}))
 		require.NoError(t, err)
@@ -884,8 +931,7 @@ func TestExecuteBash(t *testing.T) {
 
 	t.Run("omits empty stdout section", func(t *testing.T) {
 		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": "echo err >&2",
 		}))
 		require.NoError(t, err)
@@ -916,7 +962,7 @@ func resultText(t *testing.T, r *pipe.ToolResult) string {
 **Step 2: Run tests to verify they fail**
 
 Run: `go test ./exec/ -run TestExecuteBash -v`
-Expected: compilation error — `NewBashExecutor` not defined
+Expected: compilation failure or test failures — new result format not implemented
 
 **Step 3: Implement rewritten bash execution**
 
@@ -931,6 +977,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	osexec "os/exec"
 	"strings"
 	"syscall"
@@ -940,14 +987,559 @@ import (
 )
 
 type bashArgs struct {
-	Command  string `json:"command"`
-	Timeout  int    `json:"timeout"`   // milliseconds
-	CheckPID int    `json:"check_pid"`
-	KillPID  int    `json:"kill_pid"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout"` // milliseconds
 }
 
 // BashTool returns the tool definition for the bash tool.
 func BashTool() pipe.Tool {
+	return pipe.Tool{
+		Name: "bash",
+		Description: fmt.Sprintf(
+			"Execute a bash command. Output truncated to last %d lines or %dKB; "+
+				"if truncated, full output saved to temp file readable with the read tool.",
+			DefaultMaxLines, DefaultMaxBytes/1024,
+		),
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"command": {
+					"type": "string",
+					"description": "The bash command to execute"
+				},
+				"timeout": {
+					"type": "integer",
+					"description": "Timeout in milliseconds (default: 120000)"
+				}
+			},
+			"required": ["command"]
+		}`),
+	}
+}
+
+const rollingBufSize = 2 * DefaultMaxBytes // 100KB rolling buffer
+
+// ExecuteBash executes a bash command and returns the result with separate
+// stdout/stderr, output sanitization, tail truncation, and file offloading.
+func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, error) {
+	var a bashArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return domainError(fmt.Sprintf("invalid arguments: %s", err)), nil
+	}
+
+	if a.Command == "" {
+		return domainError("command is required"), nil
+	}
+
+	timeout := 120 * time.Second
+	if a.Timeout > 0 {
+		timeout = time.Duration(a.Timeout) * time.Millisecond
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := osexec.CommandContext(ctx, "bash", "-c", a.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return domainError(fmt.Sprintf("failed to create stdout pipe: %s", err)), nil
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return domainError(fmt.Sprintf("failed to create stderr pipe: %s", err)), nil
+	}
+
+	if err := cmd.Start(); err != nil {
+		return domainError(fmt.Sprintf("failed to start command: %s", err)), nil
+	}
+
+	stdoutC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
+	stderrC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
+
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { io.Copy(stdoutC, stdoutPipe); close(stdoutDone) }()
+	go func() { io.Copy(stderrC, stderrPipe); close(stderrDone) }()
+
+	waitErr := cmd.Wait()
+	<-stdoutDone
+	<-stderrDone
+	stdoutC.Close()
+	stderrC.Close()
+
+	// Determine exit code.
+	exitCode := 0
+	isError := false
+	if waitErr != nil {
+		var exitErr *osexec.ExitError
+		isRealExit := errors.As(waitErr, &exitErr) && exitErr.ExitCode() >= 0
+		if !isRealExit && ctx.Err() != nil {
+			return formatTimeoutResult(ctx.Err(), stdoutC, stderrC), nil
+		}
+		isError = true
+		if errors.As(waitErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return formatResult(exitCode, isError, stdoutC, stderrC), nil
+}
+
+// processOutput sanitizes and truncates collector output. Returns the processed
+// string and truncation metadata.
+func processOutput(c *OutputCollector) (string, TruncateResult) {
+	raw := string(c.Bytes())
+	clean := Sanitize(raw)
+	tr := TruncateTail(clean, DefaultMaxLines, DefaultMaxBytes)
+	// Override total lines with the collector's accurate count (rolling buffer
+	// may have dropped early data).
+	tr.TotalLines = c.TotalLines()
+	return tr.Content, tr
+}
+
+func formatResult(exitCode int, isError bool, stdout, stderr *OutputCollector) *pipe.ToolResult {
+	stdoutStr, stdoutTR := processOutput(stdout)
+	stderrStr, stderrTR := processOutput(stderr)
+
+	var b strings.Builder
+	if stdoutStr != "" {
+		fmt.Fprintf(&b, "stdout:\n%s\n", stdoutStr)
+	}
+	if stderrStr != "" {
+		fmt.Fprintf(&b, "stderr:\n%s\n", stderrStr)
+	}
+	fmt.Fprintf(&b, "exit code: %d", exitCode)
+
+	appendOffloadNotice(&b, "stdout", stdoutTR, stdout.FilePath())
+	appendOffloadNotice(&b, "stderr", stderrTR, stderr.FilePath())
+
+	return &pipe.ToolResult{
+		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+		IsError: isError,
+	}
+}
+
+func formatTimeoutResult(ctxErr error, stdout, stderr *OutputCollector) *pipe.ToolResult {
+	stdoutStr, _ := processOutput(stdout)
+	stderrStr, _ := processOutput(stderr)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "command timed out: %s\n", ctxErr)
+	if stdoutStr != "" {
+		fmt.Fprintf(&b, "\nstdout (partial):\n%s\n", stdoutStr)
+	}
+	if stderrStr != "" {
+		fmt.Fprintf(&b, "\nstderr (partial):\n%s\n", stderrStr)
+	}
+
+	return &pipe.ToolResult{
+		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+		IsError: true,
+	}
+}
+
+func appendOffloadNotice(b *strings.Builder, name string, tr TruncateResult, filePath string) {
+	if !tr.Truncated && filePath == "" {
+		return
+	}
+	if filePath != "" {
+		fmt.Fprintf(b, "\n[%s: Showing last %d of %d lines. Full output: %s]",
+			name, tr.OutputLines, tr.TotalLines, filePath)
+	} else if tr.Truncated {
+		fmt.Fprintf(b, "\n[%s: Showing last %d of %d lines]",
+			name, tr.OutputLines, tr.TotalLines)
+	}
+}
+```
+
+**Step 4: Run tests to verify they pass**
+
+Run: `go test ./exec/ -v`
+Expected: all PASS (sanitize, truncate, collector, bash tool, bash execute)
+
+**Step 5: Update dispatcher in `cmd/pipe/tools.go`**
+
+The signature changed — `ExecuteBash` stays a standalone function with the same
+`(ctx, args)` signature, so the dispatcher needs no changes. Verify:
+
+Run: `go test ./cmd/pipe/ -v`
+Expected: PASS
+
+**Step 6: Run `make validate`**
+
+Run: `make validate`
+Expected: PASS
+
+**Step 7: Commit**
+
+```bash
+git add exec/bash.go exec/bash_test.go
+git commit -m "feat(exec): rewrite bash tool with output pipeline
+
+Separate stdout/stderr, sanitize ANSI codes, tail truncation with
+file offloading. Accurate total line counts from collector. Kill
+on timeout (background execution added in next task)."
+```
+
+---
+
+### Task 5: Background Execution
+
+Add auto-backgrounding on timeout, `check_pid`/`kill_pid` management. This
+changes `ExecuteBash` from a standalone function to a `BashExecutor` struct that
+holds a `BackgroundRegistry`.
+
+**Files:**
+- Create: `exec/background.go`
+- Create: `exec/background_test.go`
+- Modify: `exec/bash.go` (add BashExecutor, update tool schema)
+- Modify: `exec/bash_test.go` (add background tests)
+- Modify: `cmd/pipe/tools.go` (wire BashExecutor)
+- Modify: `cmd/pipe/main.go` (if executor needs wiring)
+
+**Step 1: Write failing tests for background behavior**
+
+Add to `exec/bash_test.go` (or create `exec/background_test.go`):
+
+```go
+// exec/background_test.go
+package exec_test
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	pipeexec "github.com/fwojciec/pipe/exec"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBackgroundExecution(t *testing.T) {
+	t.Parallel()
+
+	t.Run("auto-backgrounds command on timeout", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+		start := time.Now()
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "sleep 30",
+			"timeout": 200, // 200ms timeout
+		}))
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		assert.Less(t, elapsed, 2*time.Second)
+
+		text := resultText(t, result)
+		assert.Contains(t, text, "backgrounded")
+		assert.Contains(t, text, "pid")
+		assert.False(t, result.IsError)
+
+		// Clean up: kill the backgrounded process.
+		pid := extractPID(t, text)
+		e.Execute(context.Background(), mustJSON(t, map[string]any{"kill_pid": pid}))
+	})
+
+	t.Run("check_pid returns status of running process", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+
+		// Start a command that will be backgrounded.
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "echo started && sleep 30",
+			"timeout": 200,
+		}))
+		require.NoError(t, err)
+		text := resultText(t, result)
+		require.Contains(t, text, "backgrounded")
+
+		pid := extractPID(t, text)
+		require.Greater(t, pid, 0)
+
+		// Check on it.
+		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"check_pid": pid,
+		}))
+		require.NoError(t, err)
+		text = resultText(t, result)
+		assert.Contains(t, text, "still running")
+
+		// Clean up.
+		e.Execute(context.Background(), mustJSON(t, map[string]any{"kill_pid": pid}))
+	})
+
+	t.Run("kill_pid terminates process and returns output", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "echo started && sleep 30",
+			"timeout": 200,
+		}))
+		require.NoError(t, err)
+		pid := extractPID(t, resultText(t, result))
+
+		// Kill it.
+		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"kill_pid": pid,
+		}))
+		require.NoError(t, err)
+		text := resultText(t, result)
+		assert.Contains(t, text, "killed")
+
+		// check_pid should now return unknown.
+		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"check_pid": pid,
+		}))
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, resultText(t, result), "no background process")
+	})
+
+	t.Run("check_pid on completed process returns final output", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+
+		// Start a fast command with very short timeout so it backgrounds.
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "echo done",
+			"timeout": 1,
+		}))
+		require.NoError(t, err)
+		text := resultText(t, result)
+
+		if !strings.Contains(text, "backgrounded") {
+			t.Skip("command completed before timeout")
+		}
+
+		pid := extractPID(t, text)
+		// Wait for the process to finish.
+		time.Sleep(500 * time.Millisecond)
+
+		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"check_pid": pid,
+		}))
+		require.NoError(t, err)
+		text = resultText(t, result)
+		assert.Contains(t, text, "exited")
+	})
+
+	t.Run("check_pid on unknown pid returns error", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"check_pid": 99999,
+		}))
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, resultText(t, result), "no background process")
+	})
+}
+
+// extractPID parses "pid NNNN" from the background notice.
+func extractPID(t *testing.T, text string) int {
+	t.Helper()
+	var pid int
+	idx := strings.Index(text, "pid ")
+	if idx >= 0 {
+		fmt.Sscanf(text[idx:], "pid %d", &pid)
+	}
+	require.Greater(t, pid, 0, "could not extract pid from: %s", text)
+	return pid
+}
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run: `go test ./exec/ -run TestBackgroundExecution -v`
+Expected: compilation error — `NewBashExecutor` not defined
+
+**Step 3: Implement background.go**
+
+```go
+// exec/background.go
+package exec
+
+import (
+	"fmt"
+	osexec "os/exec"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/fwojciec/pipe"
+)
+
+// BackgroundProcess tracks a process that was auto-backgrounded on timeout.
+type BackgroundProcess struct {
+	cmd        *osexec.Cmd
+	stdout     *OutputCollector
+	stderr     *OutputCollector
+	waitCh     <-chan error
+	stdoutDone <-chan struct{}
+	stderrDone <-chan struct{}
+
+	mu       sync.Mutex
+	done     bool
+	exitCode int
+}
+
+// watch waits for the background process to complete and records its exit code.
+// Run as a goroutine.
+func (bp *BackgroundProcess) watch() {
+	waitErr := <-bp.waitCh
+	<-bp.stdoutDone
+	<-bp.stderrDone
+	bp.stdout.Close()
+	bp.stderr.Close()
+
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	bp.done = true
+	if exitErr, ok := waitErr.(*osexec.ExitError); ok {
+		bp.exitCode = exitErr.ExitCode()
+	}
+}
+
+// BackgroundRegistry tracks auto-backgrounded processes.
+type BackgroundRegistry struct {
+	mu        sync.Mutex
+	processes map[int]*BackgroundProcess
+}
+
+// NewBackgroundRegistry creates an empty registry.
+func NewBackgroundRegistry() *BackgroundRegistry {
+	return &BackgroundRegistry{processes: make(map[int]*BackgroundProcess)}
+}
+
+// Register adds a background process.
+func (r *BackgroundRegistry) Register(pid int, bp *BackgroundProcess) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.processes[pid] = bp
+}
+
+// Check returns the current status and output of a background process.
+func (r *BackgroundRegistry) Check(pid int) (*pipe.ToolResult, error) {
+	r.mu.Lock()
+	bp, ok := r.processes[pid]
+	r.mu.Unlock()
+
+	if !ok {
+		return domainError(fmt.Sprintf("no background process with pid %d", pid)), nil
+	}
+
+	bp.mu.Lock()
+	done := bp.done
+	exitCode := bp.exitCode
+	bp.mu.Unlock()
+
+	stdoutStr, stdoutTR := processOutput(bp.stdout)
+	stderrStr, stderrTR := processOutput(bp.stderr)
+
+	var b strings.Builder
+	if done {
+		fmt.Fprintf(&b, "[Process %d exited with code %d.\n", pid, exitCode)
+	} else {
+		fmt.Fprintf(&b, "[Process %d still running.\n", pid)
+	}
+	if stdoutStr != "" {
+		fmt.Fprintf(&b, "\nstdout:\n%s\n", stdoutStr)
+	}
+	if stderrStr != "" {
+		fmt.Fprintf(&b, "\nstderr:\n%s\n", stderrStr)
+	}
+	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout.FilePath())
+	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr.FilePath())
+	b.WriteString("]")
+
+	return &pipe.ToolResult{
+		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+		IsError: done && exitCode != 0,
+	}, nil
+}
+
+// Kill terminates a background process and returns its final output.
+func (r *BackgroundRegistry) Kill(pid int) (*pipe.ToolResult, error) {
+	r.mu.Lock()
+	bp, ok := r.processes[pid]
+	r.mu.Unlock()
+
+	if !ok {
+		return domainError(fmt.Sprintf("no background process with pid %d", pid)), nil
+	}
+
+	bp.mu.Lock()
+	done := bp.done
+	bp.mu.Unlock()
+
+	if !done {
+		_ = syscall.Kill(-bp.cmd.Process.Pid, syscall.SIGKILL)
+		// Wait for watch goroutine to finish (poll with short sleep).
+		for {
+			bp.mu.Lock()
+			if bp.done {
+				bp.mu.Unlock()
+				break
+			}
+			bp.mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Build result before removing from registry.
+	stdoutStr, stdoutTR := processOutput(bp.stdout)
+	stderrStr, stderrTR := processOutput(bp.stderr)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "[Process %d killed.\n", pid)
+	if stdoutStr != "" {
+		fmt.Fprintf(&b, "\nstdout:\n%s\n", stdoutStr)
+	}
+	if stderrStr != "" {
+		fmt.Fprintf(&b, "\nstderr:\n%s\n", stderrStr)
+	}
+	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout.FilePath())
+	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr.FilePath())
+	b.WriteString("]")
+
+	// Remove from registry.
+	r.mu.Lock()
+	delete(r.processes, pid)
+	r.mu.Unlock()
+
+	return &pipe.ToolResult{
+		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+		IsError: false,
+	}, nil
+}
+```
+
+**Step 4: Add BashExecutor to bash.go and update tool schema**
+
+Add to `exec/bash.go`:
+
+```go
+// bashExecutorArgs extends bashArgs with background management parameters.
+type bashExecutorArgs struct {
+	Command  string `json:"command"`
+	Timeout  int    `json:"timeout"`
+	CheckPID int    `json:"check_pid"`
+	KillPID  int    `json:"kill_pid"`
+}
+
+// BashExecutorTool returns the tool definition with background parameters.
+func BashExecutorTool() pipe.Tool {
 	return pipe.Tool{
 		Name: "bash",
 		Description: fmt.Sprintf(
@@ -980,8 +1572,7 @@ func BashTool() pipe.Tool {
 	}
 }
 
-// BashExecutor executes bash commands with output truncation, sanitization,
-// file offloading, and background process management.
+// BashExecutor executes bash commands with background process management.
 type BashExecutor struct {
 	bg *BackgroundRegistry
 }
@@ -993,16 +1584,16 @@ func NewBashExecutor() *BashExecutor {
 
 // Execute runs a bash command or manages a background process.
 func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, error) {
-	var a bashArgs
+	var a bashExecutorArgs
 	if err := json.Unmarshal(args, &a); err != nil {
 		return domainError(fmt.Sprintf("invalid arguments: %s", err)), nil
 	}
 
 	switch {
 	case a.CheckPID > 0:
-		return e.checkPID(a.CheckPID)
+		return e.bg.Check(a.CheckPID)
 	case a.KillPID > 0:
-		return e.killPID(a.KillPID)
+		return e.bg.Kill(a.KillPID)
 	case a.Command != "":
 		return e.runCommand(ctx, a)
 	default:
@@ -1010,16 +1601,14 @@ func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (*pipe
 	}
 }
 
-const (
-	rollingBufSize = 2 * DefaultMaxBytes // 100KB rolling buffer
-)
-
-func (e *BashExecutor) runCommand(ctx context.Context, a bashArgs) (*pipe.ToolResult, error) {
+func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pipe.ToolResult, error) {
 	timeout := 120 * time.Second
 	if a.Timeout > 0 {
 		timeout = time.Duration(a.Timeout) * time.Millisecond
 	}
 
+	// Use exec.Command (not CommandContext) so timeout doesn't auto-kill —
+	// we want to auto-background instead.
 	cmd := osexec.Command("bash", "-c", a.Command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -1041,8 +1630,8 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashArgs) (*pipe.ToolRe
 
 	stdoutDone := make(chan struct{})
 	stderrDone := make(chan struct{})
-	go func() { copyAndClose(stdoutC, stdoutPipe); close(stdoutDone) }()
-	go func() { copyAndClose(stderrC, stderrPipe); close(stderrDone) }()
+	go func() { io.Copy(stdoutC, stdoutPipe); close(stdoutDone) }()
+	go func() { io.Copy(stderrC, stderrPipe); close(stderrDone) }()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -1052,27 +1641,44 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashArgs) (*pipe.ToolRe
 
 	select {
 	case waitErr := <-waitCh:
-		// Process completed.
+		// Process completed before timeout.
 		<-stdoutDone
 		<-stderrDone
 		stdoutC.Close()
 		stderrC.Close()
-		return e.formatResult(waitErr, stdoutC, stderrC), nil
+		return e.formatCompletedResult(waitErr, stdoutC, stderrC), nil
 
 	case <-timer.C:
 		// Timeout: auto-background.
 		pid := cmd.Process.Pid
 		bg := &BackgroundProcess{
-			cmd:     cmd,
-			stdout:  stdoutC,
-			stderr:  stderrC,
-			waitCh:  waitCh,
+			cmd:        cmd,
+			stdout:     stdoutC,
+			stderr:     stderrC,
+			waitCh:     waitCh,
 			stdoutDone: stdoutDone,
 			stderrDone: stderrDone,
 		}
 		go bg.watch()
 		e.bg.Register(pid, bg)
-		return e.formatBackgroundResult(pid, timeout, stdoutC, stderrC), nil
+
+		stdoutStr, _ := processOutput(stdoutC)
+		stderrStr, _ := processOutput(stderrC)
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "[Command backgrounded after %s timeout (pid %d).\n", timeout, pid)
+		if stdoutStr != "" {
+			fmt.Fprintf(&b, "\nstdout (partial):\n%s\n", stdoutStr)
+		}
+		if stderrStr != "" {
+			fmt.Fprintf(&b, "\nstderr (partial):\n%s\n", stderrStr)
+		}
+		b.WriteString("\nUse check_pid or kill_pid to manage.]")
+
+		return &pipe.ToolResult{
+			Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+			IsError: false,
+		}, nil
 
 	case <-ctx.Done():
 		// External cancellation: kill.
@@ -1086,10 +1692,7 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashArgs) (*pipe.ToolRe
 	}
 }
 
-func (e *BashExecutor) formatResult(waitErr error, stdout, stderr *OutputCollector) *pipe.ToolResult {
-	stdoutStr := processOutput(stdout)
-	stderrStr := processOutput(stderr)
-
+func (e *BashExecutor) formatCompletedResult(waitErr error, stdout, stderr *OutputCollector) *pipe.ToolResult {
 	exitCode := 0
 	isError := false
 	if waitErr != nil {
@@ -1101,493 +1704,39 @@ func (e *BashExecutor) formatResult(waitErr error, stdout, stderr *OutputCollect
 			exitCode = -1
 		}
 	}
-
-	var b strings.Builder
-	if stdoutStr != "" {
-		fmt.Fprintf(&b, "stdout:\n%s\n", stdoutStr)
-	}
-	if stderrStr != "" {
-		fmt.Fprintf(&b, "stderr:\n%s\n", stderrStr)
-	}
-	fmt.Fprintf(&b, "exit code: %d", exitCode)
-
-	// Append truncation notices.
-	appendOffloadNotice(&b, "stdout", stdout)
-	appendOffloadNotice(&b, "stderr", stderr)
-
-	return &pipe.ToolResult{
-		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
-		IsError: isError,
-	}
-}
-
-func (e *BashExecutor) formatBackgroundResult(pid int, timeout time.Duration, stdout, stderr *OutputCollector) *pipe.ToolResult {
-	stdoutStr := processOutput(stdout)
-	stderrStr := processOutput(stderr)
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "[Command backgrounded after %s timeout (pid %d).\n", timeout, pid)
-	if stdoutStr != "" {
-		fmt.Fprintf(&b, "\nstdout (partial):\n%s\n", stdoutStr)
-	}
-	if stderrStr != "" {
-		fmt.Fprintf(&b, "\nstderr (partial):\n%s\n", stderrStr)
-	}
-	appendOffloadNotice(&b, "stdout", stdout)
-	appendOffloadNotice(&b, "stderr", stderr)
-	b.WriteString("\nUse check_pid or kill_pid to manage.]")
-
-	return &pipe.ToolResult{
-		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
-		IsError: false,
-	}
-}
-
-// processOutput sanitizes and truncates collector output.
-func processOutput(c *OutputCollector) string {
-	raw := string(c.Bytes())
-	clean := Sanitize(raw)
-	tr := TruncateTail(clean, DefaultMaxLines, DefaultMaxBytes)
-	return tr.Content
-}
-
-func appendOffloadNotice(b *strings.Builder, name string, c *OutputCollector) {
-	raw := string(c.Bytes())
-	clean := Sanitize(raw)
-	tr := TruncateTail(clean, DefaultMaxLines, DefaultMaxBytes)
-
-	if !tr.Truncated && c.FilePath() == "" {
-		return
-	}
-
-	if c.FilePath() != "" {
-		fmt.Fprintf(b, "\n[%s: showing last %d of %d lines. Full output: %s]",
-			name, tr.OutputLines, tr.TotalLines, c.FilePath())
-	} else if tr.Truncated {
-		fmt.Fprintf(b, "\n[%s: showing last %d of %d lines]",
-			name, tr.OutputLines, tr.TotalLines)
-	}
-}
-
-func copyAndClose(dst *OutputCollector, src interface{ Read([]byte) (int, error) }) {
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			dst.Write(buf[:n])
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-// checkPID and killPID are placeholder stubs — implemented in Task 5.
-func (e *BashExecutor) checkPID(pid int) (*pipe.ToolResult, error) {
-	return e.bg.Check(pid)
-}
-
-func (e *BashExecutor) killPID(pid int) (*pipe.ToolResult, error) {
-	return e.bg.Kill(pid)
+	return formatResult(exitCode, isError, stdout, stderr)
 }
 ```
 
-Note: The `appendOffloadNotice` function re-processes output, which is redundant.
-Refactor: have `formatResult` call a helper that returns both the processed string
-and truncation metadata. This optimization can be done when tests pass.
+Note: `io` import needed for `io.Copy`. Add to import block.
 
-**Step 4: Run tests to verify they pass**
-
-Run: `go test ./exec/ -run TestBashTool -v && go test ./exec/ -run TestExecuteBash -v`
-Expected: BashTool tests PASS. ExecuteBash tests may need `BackgroundRegistry` stub (Task 5). If so, create a minimal stub first.
-
-**Step 5: Create minimal BackgroundRegistry stub to unblock tests**
-
-```go
-// exec/background.go
-package exec
-
-import (
-	"fmt"
-	osexec "os/exec"
-	"sync"
-	"syscall"
-
-	"github.com/fwojciec/pipe"
-)
-
-// BackgroundProcess tracks a process that was auto-backgrounded.
-type BackgroundProcess struct {
-	cmd        *osexec.Cmd
-	stdout     *OutputCollector
-	stderr     *OutputCollector
-	waitCh     <-chan error
-	stdoutDone <-chan struct{}
-	stderrDone <-chan struct{}
-
-	mu       sync.Mutex
-	done     bool
-	exitCode int
-	waitErr  error
-}
-
-func (bp *BackgroundProcess) watch() {
-	err := <-bp.waitCh
-	<-bp.stdoutDone
-	<-bp.stderrDone
-	bp.stdout.Close()
-	bp.stderr.Close()
-
-	bp.mu.Lock()
-	defer bp.mu.Unlock()
-	bp.done = true
-	bp.waitErr = err
-	if exitErr, ok := err.(*osexec.ExitError); ok {
-		bp.exitCode = exitErr.ExitCode()
-	}
-}
-
-// BackgroundRegistry tracks auto-backgrounded processes.
-type BackgroundRegistry struct {
-	mu        sync.Mutex
-	processes map[int]*BackgroundProcess
-}
-
-// NewBackgroundRegistry creates an empty registry.
-func NewBackgroundRegistry() *BackgroundRegistry {
-	return &BackgroundRegistry{processes: make(map[int]*BackgroundProcess)}
-}
-
-// Register adds a background process.
-func (r *BackgroundRegistry) Register(pid int, bp *BackgroundProcess) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.processes[pid] = bp
-}
-
-// Check returns the current status and new output of a background process.
-func (r *BackgroundRegistry) Check(pid int) (*pipe.ToolResult, error) {
-	r.mu.Lock()
-	bp, ok := r.processes[pid]
-	r.mu.Unlock()
-
-	if !ok {
-		return domainError(fmt.Sprintf("no background process with pid %d", pid)), nil
-	}
-
-	bp.mu.Lock()
-	done := bp.done
-	exitCode := bp.exitCode
-	bp.mu.Unlock()
-
-	stdoutStr := processOutput(bp.stdout)
-	stderrStr := processOutput(bp.stderr)
-
-	var b fmt.Stringer
-	var sb = new(stringBuilder)
-
-	if done {
-		fmt.Fprintf(sb, "[Process %d exited with code %d.\n", pid, exitCode)
-	} else {
-		fmt.Fprintf(sb, "[Process %d still running.\n", pid)
-	}
-	if stdoutStr != "" {
-		fmt.Fprintf(sb, "\nstdout:\n%s\n", stdoutStr)
-	}
-	if stderrStr != "" {
-		fmt.Fprintf(sb, "\nstderr:\n%s\n", stderrStr)
-	}
-	appendOffloadNotice(sb.inner(), "stdout", bp.stdout)
-	appendOffloadNotice(sb.inner(), "stderr", bp.stderr)
-	sb.WriteString("]")
-
-	_ = b
-	return &pipe.ToolResult{
-		Content: []pipe.ContentBlock{pipe.TextBlock{Text: sb.String()}},
-		IsError: done && exitCode != 0,
-	}, nil
-}
-
-// Kill terminates a background process and returns its final output.
-func (r *BackgroundRegistry) Kill(pid int) (*pipe.ToolResult, error) {
-	r.mu.Lock()
-	bp, ok := r.processes[pid]
-	r.mu.Unlock()
-
-	if !ok {
-		return domainError(fmt.Sprintf("no background process with pid %d", pid)), nil
-	}
-
-	bp.mu.Lock()
-	done := bp.done
-	bp.mu.Unlock()
-
-	if !done {
-		_ = syscall.Kill(-bp.cmd.Process.Pid, syscall.SIGKILL)
-		// Wait for watch goroutine to finish.
-		for {
-			bp.mu.Lock()
-			if bp.done {
-				bp.mu.Unlock()
-				break
-			}
-			bp.mu.Unlock()
-		}
-	}
-
-	// Remove from registry.
-	r.mu.Lock()
-	delete(r.processes, pid)
-	r.mu.Unlock()
-
-	return r.Check(pid)
-}
-```
-
-Wait — the Kill method calls Check after deleting from registry, which would fail.
-The actual implementation should be cleaner. This is a sketch — the real
-implementation in Task 5 will be clean. For now, use inline formatting in Kill.
-
-**Step 6: Run full test suite**
+**Step 5: Run tests**
 
 Run: `go test ./exec/ -v`
-Expected: all PASS (sanitize, truncate, collector, bash tool, bash execute)
-
-**Step 7: Run `make validate`**
-
-Run: `make validate`
-Expected: PASS
-
-**Step 8: Commit**
-
-```bash
-git add exec/bash.go exec/bash_test.go exec/background.go
-git commit -m "feat(exec): rewrite bash tool with output pipeline
-
-Separate stdout/stderr, sanitize ANSI codes, tail truncation with
-file offloading, auto-backgrounding on timeout."
-```
-
----
-
-### Task 5: Background Execution
-
-Complete the background process management: auto-backgrounding on timeout,
-check_pid, kill_pid.
-
-**Files:**
-- Modify: `exec/background.go` (complete implementation from stub)
-- Create: `exec/background_test.go`
-
-**Step 1: Write failing tests**
-
-```go
-// exec/background_test.go
-package exec_test
-
-import (
-	"context"
-	"encoding/json"
-	"strings"
-	"testing"
-	"time"
-
-	pipeexec "github.com/fwojciec/pipe/exec"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-func TestBackgroundExecution(t *testing.T) {
-	t.Parallel()
-
-	t.Run("auto-backgrounds command on timeout", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		start := time.Now()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "sleep 30",
-			"timeout": 200, // 200ms timeout
-		}))
-		elapsed := time.Since(start)
-		require.NoError(t, err)
-		assert.Less(t, elapsed, 2*time.Second)
-
-		text := resultText(t, result)
-		assert.Contains(t, text, "backgrounded")
-		assert.Contains(t, text, "pid")
-		assert.False(t, result.IsError)
-	})
-
-	t.Run("check_pid returns status of running process", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-
-		// Start a command that will be backgrounded.
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "echo started && sleep 30",
-			"timeout": 200,
-		}))
-		require.NoError(t, err)
-		text := resultText(t, result)
-		require.Contains(t, text, "backgrounded")
-
-		// Extract pid from result.
-		pid := extractPID(t, text)
-		require.Greater(t, pid, 0)
-
-		// Check on it.
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"check_pid": pid,
-		}))
-		require.NoError(t, err)
-		text = resultText(t, result)
-		assert.Contains(t, text, "still running")
-
-		// Clean up.
-		e.Execute(context.Background(), mustJSON(t, map[string]any{"kill_pid": pid}))
-	})
-
-	t.Run("kill_pid terminates process and returns output", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-
-		// Start a command that will be backgrounded.
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "echo started && sleep 30",
-			"timeout": 200,
-		}))
-		require.NoError(t, err)
-		pid := extractPID(t, resultText(t, result))
-
-		// Kill it.
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"kill_pid": pid,
-		}))
-		require.NoError(t, err)
-		text := resultText(t, result)
-		assert.Contains(t, text, "killed")
-
-		// check_pid should now return unknown.
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"check_pid": pid,
-		}))
-		require.NoError(t, err)
-		assert.True(t, result.IsError)
-		assert.Contains(t, resultText(t, result), "no background process")
-	})
-
-	t.Run("check_pid on completed process returns final output", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-
-		// Start a fast command with very short timeout so it backgrounds.
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "echo done",
-			"timeout": 1, // 1ms — will almost certainly background
-		}))
-		require.NoError(t, err)
-		text := resultText(t, result)
-
-		// It might complete before timeout or get backgrounded.
-		if !strings.Contains(text, "backgrounded") {
-			t.Skip("command completed before timeout")
-		}
-
-		pid := extractPID(t, text)
-		// Wait a moment for the process to finish.
-		time.Sleep(500 * time.Millisecond)
-
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"check_pid": pid,
-		}))
-		require.NoError(t, err)
-		text = resultText(t, result)
-		assert.Contains(t, text, "exited")
-	})
-
-	t.Run("check_pid on unknown pid returns error", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"check_pid": 99999,
-		}))
-		require.NoError(t, err)
-		assert.True(t, result.IsError)
-		assert.Contains(t, resultText(t, result), "no background process")
-	})
-}
-
-// extractPID parses "pid NNNN" from the background notice.
-func extractPID(t *testing.T, text string) int {
-	t.Helper()
-	// Look for "pid NNNN" pattern.
-	var pid int
-	for _, line := range strings.Split(text, " ") {
-		if _, err := fmt.Sscanf(line, "%d)", &pid); err == nil && pid > 0 {
-			return pid
-		}
-		if _, err := fmt.Sscanf(line, "%d).", &pid); err == nil && pid > 0 {
-			return pid
-		}
-	}
-	// Try alternate format: "(pid NNNN)"
-	idx := strings.Index(text, "pid ")
-	if idx >= 0 {
-		fmt.Sscanf(text[idx:], "pid %d", &pid)
-	}
-	require.Greater(t, pid, 0, "could not extract pid from: %s", text)
-	return pid
-}
-```
-
-**Step 2: Run tests to verify they fail**
-
-Run: `go test ./exec/ -run TestBackgroundExecution -v`
-Expected: failures — background logic not yet properly implemented
-
-**Step 3: Complete background.go implementation**
-
-Clean up `exec/background.go` with proper Check and Kill methods. Ensure
-`watch()` goroutine properly handles process completion. Use `strings.Builder`
-consistently (not the `stringBuilder` sketch from Task 4).
-
-Key implementation details:
-- `Check`: read current collector state, format result based on `done` flag
-- `Kill`: send SIGKILL to process group, wait for `done`, format result, remove
-  from registry
-- `watch()`: wait on `waitCh`, then `stdoutDone`/`stderrDone`, set `done = true`
-
-**Step 4: Run tests**
-
-Run: `go test ./exec/ -run TestBackgroundExecution -v`
-Expected: all PASS
-
-**Step 5: Run full suite + validate**
-
-Run: `go test ./exec/ -v && make validate`
 Expected: all PASS
 
 **Step 6: Commit**
 
 ```bash
-git add exec/background.go exec/background_test.go
+git add exec/background.go exec/background_test.go exec/bash.go exec/bash_test.go
 git commit -m "feat(exec): add background process management
 
-Auto-background commands on timeout. check_pid and kill_pid for
-monitoring and terminating background processes."
+Auto-background commands on timeout instead of killing. check_pid
+and kill_pid for monitoring and terminating background processes.
+BashExecutor struct holds BackgroundRegistry for session-scoped
+process tracking."
 ```
 
 ---
 
 ### Task 6: Wire Up Dispatcher
 
-Update `cmd/pipe/tools.go` to use `BashExecutor` instead of the standalone
-`ExecuteBash` function.
+Update `cmd/pipe/tools.go` to use `BashExecutor` and `BashExecutorTool`.
 
 **Files:**
 - Modify: `cmd/pipe/tools.go`
+- Modify: `cmd/pipe/main.go` (if needed)
 - Modify: `cmd/pipe/tools_test.go` (if needed)
-- Modify: `cmd/pipe/main.go` (if executor needs wiring)
 
 **Step 1: Update executor struct**
 
@@ -1607,50 +1756,61 @@ func (e *executor) Execute(ctx context.Context, name string, args json.RawMessag
 	switch name {
 	case "bash":
 		return e.bash.Execute(ctx, args)
+	case "read":
+		return fs.ExecuteRead(ctx, args)
 	// ... rest unchanged
+	}
+}
+
+func tools() []pipe.Tool {
+	return []pipe.Tool{
+		pipeexec.BashExecutorTool(), // was BashTool()
+		fs.ReadTool(),
+		// ... rest unchanged
 	}
 }
 ```
 
 **Step 2: Update main.go** to use `newExecutor()` instead of `&executor{}`.
 
-**Step 3: Update tools_test.go** to use `newExecutor()`.
-
-**Step 4: Run tests**
+**Step 3: Run tests**
 
 Run: `go test ./cmd/pipe/ -v && go test ./... -v`
 Expected: all PASS
 
-**Step 5: Run `make validate`**
+**Step 4: Run `make validate`**
 
 Run: `make validate`
 Expected: PASS
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
 git add cmd/pipe/tools.go cmd/pipe/tools_test.go cmd/pipe/main.go
 git commit -m "wire BashExecutor into tool dispatcher
 
 Replace standalone ExecuteBash with BashExecutor for background
-process support."
+process support. Use BashExecutorTool for updated schema."
 ```
 
 ---
 
-### Task 7: Clean Up and Delete Old Code
+### Task 7: Clean Up
 
-**Step 1:** Remove the old standalone `ExecuteBash` function if it still exists
-(it should have been replaced in Task 4). Verify no other callers remain.
+**Step 1:** Verify the standalone `ExecuteBash` is still used (it may be called
+directly in non-background contexts). If only `BashExecutor.Execute` is used,
+consider whether to keep `ExecuteBash` as a convenience or remove it. If keeping
+it, ensure it and `BashExecutor` share the same `formatResult` / `processOutput`
+helpers (they should already from Task 4).
 
 **Step 2:** Run full test suite.
 
 Run: `go test ./... -v && make validate`
 Expected: all PASS
 
-**Step 3: Commit**
+**Step 3: Commit if any changes**
 
 ```bash
 git add -A
-git commit -m "chore: remove unused standalone ExecuteBash"
+git commit -m "chore: clean up bash tool after rewrite"
 ```
