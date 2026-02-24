@@ -274,6 +274,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.allExpanded = !m.allExpanded
 		setMsg := SetCollapsedMsg{Collapsed: !m.allExpanded}
+		var cmds []tea.Cmd
 		for i, block := range m.blocks {
 			// Skip error results — they always stay expanded.
 			// ToolResultBlock.Update also enforces this, but we skip here to
@@ -282,11 +283,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			if isCollapsible(block) {
-				m.blocks[i], _ = block.Update(setMsg)
+				var cmd tea.Cmd
+				m.blocks[i], cmd = block.Update(setMsg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		}
 		m.Viewport.SetContent(m.renderContent())
-		return m, nil
+		return m, tea.Batch(cmds...)
 	}
 
 	// When idle, pass keys to both textarea (for typing) and viewport

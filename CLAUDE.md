@@ -1,6 +1,6 @@
 ## Design Philosophy
 
-- Ben Johnson Standard Package Layout - domain types and functional core in root, dependencies in subdirectories, /go-standard-package-layout skill if in doubt
+- Ben Johnson Standard Package Layout - domain types and functional core in root, packages organized by dependency not theme, /go-standard-package-layout skill if in doubt
 - Elm Architecture via BubbleTea for TUI - tree of modules pattern, /bubble-tea skill if in doubt
 - dependency injection
 
