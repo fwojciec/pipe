@@ -158,6 +158,20 @@ func TestBashExecutor(t *testing.T) {
 		assert.Contains(t, text, "exit code: 0")
 	})
 
+	t.Run("returns error on cancelled context", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		e := pipeexec.NewBashExecutor()
+		result, err := e.Execute(ctx, mustJSON(t, map[string]any{
+			"command": "sleep 10",
+		}))
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+		text := resultText(t, result)
+		assert.Contains(t, text, "cancel")
+	})
+
 	t.Run("returns error for missing command", func(t *testing.T) {
 		t.Parallel()
 		e := pipeexec.NewBashExecutor()
