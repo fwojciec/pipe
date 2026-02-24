@@ -145,9 +145,20 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pip
 
 	select {
 	case waitErr := <-waitCh:
-		// Process completed before timeout.
-		<-stdoutDone
-		<-stderrDone
+		// Shell exited. Give io.Copy goroutines a short grace period to drain
+		// any remaining pipe buffer. If shell-backgrounded children (e.g.,
+		// "sleep 5 & echo done") keep inherited FDs open, force-close the read
+		// ends to unblock io.Copy rather than waiting for the children to exit.
+		pipesDone := make(chan struct{})
+		go func() { <-stdoutDone; <-stderrDone; close(pipesDone) }()
+		select {
+		case <-pipesDone:
+		case <-time.After(100 * time.Millisecond):
+			stdoutR.Close()
+			stderrR.Close()
+			<-stdoutDone
+			<-stderrDone
+		}
 		stdoutC.Close()
 		stderrC.Close()
 		return e.formatCompletedResult(waitErr, stdoutC, stderrC), nil
