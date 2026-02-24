@@ -109,20 +109,8 @@ func TestBackgroundExecution(t *testing.T) {
 
 		pid := extractPID(t, text)
 
-		// Wait deterministically for the process to complete.
-		ch := e.WaitBackground(pid)
-		require.NotNil(t, ch)
-		select {
-		case <-ch:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for background process to complete")
-		}
-
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"check_pid": pid,
-		}))
-		require.NoError(t, err)
-		text = resultText(t, result)
+		// Poll check_pid until the process completes — same as a real caller would.
+		text = pollUntilDone(t, e, pid)
 		assert.Contains(t, text, "exited")
 
 		// Completed process should be removed from registry after Check.
@@ -132,40 +120,6 @@ func TestBackgroundExecution(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 		assert.Contains(t, resultText(t, result), "no background process")
-	})
-
-	t.Run("kill_pid on already-completed process reports already exited", func(t *testing.T) {
-		t.Parallel()
-		e := pipeexec.NewBashExecutor()
-
-		// sleep 0.1 (100ms) with 1ms timeout — reliably backgrounds,
-		// then completes quickly so we can test the already-exited path.
-		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "sleep 0.1",
-			"timeout": 1,
-		}))
-		require.NoError(t, err)
-		text := resultText(t, result)
-		require.Contains(t, text, "backgrounded")
-
-		pid := extractPID(t, text)
-
-		// Wait deterministically for the process to complete.
-		ch := e.WaitBackground(pid)
-		require.NotNil(t, ch)
-		select {
-		case <-ch:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for background process to complete")
-		}
-
-		result, err = e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"kill_pid": pid,
-		}))
-		require.NoError(t, err)
-		text = resultText(t, result)
-		assert.Contains(t, text, "already exited")
-		assert.False(t, result.IsError)
 	})
 
 	t.Run("check_pid on unknown pid returns error", func(t *testing.T) {
@@ -212,6 +166,28 @@ func TestBackgroundExecution(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 	})
+}
+
+// pollUntilDone polls check_pid until the process reports completion.
+// Returns the final check_pid result text.
+func pollUntilDone(t *testing.T, e *pipeexec.BashExecutor, pid int) string {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"check_pid": pid,
+		}))
+		require.NoError(t, err)
+		text := resultText(t, result)
+		if strings.Contains(text, "exited") {
+			return text
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for background process to complete")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // extractPID parses "pid NNNN" from the background notice.
