@@ -226,7 +226,7 @@ func TestBashExecutor(t *testing.T) {
 		e := pipeexec.NewBashExecutor()
 		start := time.Now()
 		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "sleep 2 & echo done",
+			"command": "sleep 60 & echo done",
 		}))
 		elapsed := time.Since(start)
 		require.NoError(t, err)
