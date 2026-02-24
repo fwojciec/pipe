@@ -63,11 +63,16 @@ bytes, whether truncated, which limit triggered, whether last line is partial.
 
 ### Filesystem Offloading
 
-When total output exceeds 50KB:
+File offloading triggers **only when total bytes exceed 50KB** (the rolling buffer
+threshold). Line-only truncation (e.g., 3000 short lines totaling 20KB) does NOT
+create a temp file — the truncated output is small enough for the context window.
+
+When offloading triggers:
 
 1. Write full untruncated output to `/tmp/pipe-bash-<random-hex>.log`
 2. Append actionable notice to truncated output:
-   `[Showing last 2000 of 8500 lines. Full output: /tmp/pipe-bash-a1b2c3d4.log]`
+   `[stdout: Showing last 2000 of 8500 lines. Full output: /tmp/pipe-bash-a1b2c3d4.log]`
+3. If file I/O fails, notice warns: `Full output file may be incomplete: <path> (<error>)`
 
 The LLM uses `read` or `grep` tools to access full output selectively.
 

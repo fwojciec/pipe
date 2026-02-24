@@ -645,7 +645,8 @@ func (c *OutputCollector) Write(p []byte) (int, error) {
 	n := len(p)
 	c.total += int64(n)
 
-	// Count newlines for accurate total line tracking.
+	// Count newlines for total line tracking. This counts terminated lines only;
+	// processOutput adjusts for an unterminated final line.
 	c.totalLines += bytes.Count(p, []byte{'\n'})
 
 	c.buf = append(c.buf, p...)
@@ -845,9 +846,10 @@ func TestExecuteBash(t *testing.T) {
 		assert.Contains(t, text, "fail")
 	})
 
-	t.Run("truncates large stdout and offloads to file", func(t *testing.T) {
+	t.Run("truncates large stdout by line count", func(t *testing.T) {
 		t.Parallel()
-		// Generate output larger than DefaultMaxLines
+		// Generate more lines than DefaultMaxLines but small total bytes.
+		// Each line is ~7 bytes ("NNNNN\n"), so 3000 lines ≈ 21KB < 50KB threshold.
 		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
 			"command": fmt.Sprintf("seq 1 %d", pipeexec.DefaultMaxLines+1000),
 		}))
@@ -855,14 +857,32 @@ func TestExecuteBash(t *testing.T) {
 		require.False(t, result.IsError)
 		text := resultText(t, result)
 
-		// Should contain truncation notice with capitalized "Showing"
+		// Should contain truncation notice (line-truncated, no file offload)
 		assert.Contains(t, text, "Showing last")
-		assert.Contains(t, text, "Full output:")
+		assert.NotContains(t, text, "Full output:", "no file offload for line-only truncation")
 
 		// Should contain last lines but not first
 		assert.Contains(t, text, fmt.Sprintf("%d", pipeexec.DefaultMaxLines+1000))
+	})
 
-		// Temp file should exist and contain full output
+	t.Run("offloads to file when output exceeds byte threshold", func(t *testing.T) {
+		t.Parallel()
+		// Generate output larger than DefaultMaxBytes (50KB).
+		// 100-char lines × 1000 = 100KB > 50KB threshold.
+		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
+			"command": `python3 -c "
+for i in range(1000):
+    print('x' * 99)
+"`,
+		}))
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		text := resultText(t, result)
+
+		assert.Contains(t, text, "Showing last")
+		assert.Contains(t, text, "Full output:")
+
+		// Temp file should exist
 		for _, line := range strings.Split(text, "\n") {
 			if strings.Contains(line, "Full output:") {
 				path := strings.TrimSpace(strings.Split(line, "Full output:")[1])
@@ -1099,8 +1119,13 @@ func processOutput(c *OutputCollector) (string, TruncateResult) {
 	clean := Sanitize(raw)
 	tr := TruncateTail(clean, DefaultMaxLines, DefaultMaxBytes)
 	// Override total lines with the collector's accurate count (rolling buffer
-	// may have dropped early data).
-	tr.TotalLines = c.TotalLines()
+	// may have dropped early data). TotalLines() counts \n characters; add 1
+	// for an unterminated final line.
+	total := c.TotalLines()
+	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		total++
+	}
+	tr.TotalLines = total
 	return tr.Content, tr
 }
 
@@ -1117,8 +1142,8 @@ func formatResult(exitCode int, isError bool, stdout, stderr *OutputCollector) *
 	}
 	fmt.Fprintf(&b, "exit code: %d", exitCode)
 
-	appendOffloadNotice(&b, "stdout", stdoutTR, stdout.FilePath())
-	appendOffloadNotice(&b, "stderr", stderrTR, stderr.FilePath())
+	appendOffloadNotice(&b, "stdout", stdoutTR, stdout)
+	appendOffloadNotice(&b, "stderr", stderrTR, stderr)
 
 	return &pipe.ToolResult{
 		Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
@@ -1145,13 +1170,19 @@ func formatTimeoutResult(ctxErr error, stdout, stderr *OutputCollector) *pipe.To
 	}
 }
 
-func appendOffloadNotice(b *strings.Builder, name string, tr TruncateResult, filePath string) {
+func appendOffloadNotice(b *strings.Builder, name string, tr TruncateResult, c *OutputCollector) {
+	filePath := c.FilePath()
+	offloadErr := c.Err()
+
 	if !tr.Truncated && filePath == "" {
 		return
 	}
-	if filePath != "" {
+	if filePath != "" && offloadErr == nil {
 		fmt.Fprintf(b, "\n[%s: Showing last %d of %d lines. Full output: %s]",
 			name, tr.OutputLines, tr.TotalLines, filePath)
+	} else if filePath != "" && offloadErr != nil {
+		fmt.Fprintf(b, "\n[%s: Showing last %d of %d lines. Full output file may be incomplete: %s (%s)]",
+			name, tr.OutputLines, tr.TotalLines, filePath, offloadErr)
 	} else if tr.Truncated {
 		fmt.Fprintf(b, "\n[%s: Showing last %d of %d lines]",
 			name, tr.OutputLines, tr.TotalLines)
@@ -1459,8 +1490,8 @@ func (r *BackgroundRegistry) Check(pid int) (*pipe.ToolResult, error) {
 	if stderrStr != "" {
 		fmt.Fprintf(&b, "\nstderr:\n%s\n", stderrStr)
 	}
-	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout.FilePath())
-	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr.FilePath())
+	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout)
+	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr)
 	b.WriteString("]")
 
 	return &pipe.ToolResult{
@@ -1509,8 +1540,8 @@ func (r *BackgroundRegistry) Kill(pid int) (*pipe.ToolResult, error) {
 	if stderrStr != "" {
 		fmt.Fprintf(&b, "\nstderr:\n%s\n", stderrStr)
 	}
-	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout.FilePath())
-	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr.FilePath())
+	appendOffloadNotice(&b, "stdout", stdoutTR, bp.stdout)
+	appendOffloadNotice(&b, "stderr", stderrTR, bp.stderr)
 	b.WriteString("]")
 
 	// Remove from registry.
@@ -1735,10 +1766,10 @@ Update `cmd/pipe/tools.go` to use `BashExecutor` and `BashExecutorTool`.
 
 **Files:**
 - Modify: `cmd/pipe/tools.go`
-- Modify: `cmd/pipe/main.go` (if needed)
-- Modify: `cmd/pipe/tools_test.go` (if needed)
+- Modify: `cmd/pipe/main.go`
+- Modify: `cmd/pipe/tools_test.go`
 
-**Step 1: Update executor struct**
+**Step 1: Update executor struct in `cmd/pipe/tools.go`**
 
 ```go
 // cmd/pipe/tools.go
@@ -1771,9 +1802,25 @@ func tools() []pipe.Tool {
 }
 ```
 
-**Step 2: Update main.go** to use `newExecutor()` instead of `&executor{}`.
+**Step 2: Update `cmd/pipe/main.go`** to use `newExecutor()` instead of `&executor{}`.
 
-**Step 3: Run tests**
+**Step 3: Update `cmd/pipe/tools_test.go`**
+
+Replace all `&executor{}` with `newExecutor()`. The `executor` struct now has a
+`bash *pipeexec.BashExecutor` field that must be initialized — bare `&executor{}`
+leaves `bash` nil, causing a panic on bash dispatch.
+
+```go
+// In every test case, change:
+//   exec := &executor{}
+// to:
+//   exec := newExecutor()
+```
+
+There are 8 occurrences across the test file (lines 20, 37, 53, 70, 91, 107,
+120, 132 in the current tools_test.go).
+
+**Step 4: Run tests**
 
 Run: `go test ./cmd/pipe/ -v && go test ./... -v`
 Expected: all PASS
