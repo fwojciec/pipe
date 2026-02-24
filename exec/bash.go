@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	osexec "os/exec"
 	"strings"
 	"syscall"
@@ -98,26 +99,40 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pip
 	cmd := osexec.Command("bash", "-c", a.Command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdoutPipe, err := cmd.StdoutPipe()
+	// Create pipes manually instead of using cmd.StdoutPipe/StderrPipe so
+	// that cmd.Wait() doesn't close the read ends before io.Copy finishes.
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return domainError(fmt.Sprintf("failed to create stdout pipe: %s", err)), nil
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
 		return domainError(fmt.Sprintf("failed to create stderr pipe: %s", err)), nil
 	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		stderrR.Close()
+		stderrW.Close()
 		return domainError(fmt.Sprintf("failed to start command: %s", err)), nil
 	}
+
+	// Close write ends in parent; child has its own copies.
+	stdoutW.Close()
+	stderrW.Close()
 
 	stdoutC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
 	stderrC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
 
 	stdoutDone := make(chan struct{})
 	stderrDone := make(chan struct{})
-	go func() { _, _ = io.Copy(stdoutC, stdoutPipe); close(stdoutDone) }()
-	go func() { _, _ = io.Copy(stderrC, stderrPipe); close(stderrDone) }()
+	go func() { _, _ = io.Copy(stdoutC, stdoutR); stdoutR.Close(); close(stdoutDone) }()
+	go func() { _, _ = io.Copy(stderrC, stderrR); stderrR.Close(); close(stderrDone) }()
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()

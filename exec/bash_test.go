@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
+	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/fwojciec/pipe"
@@ -13,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var fullOutputRe = regexp.MustCompile(`Full output: (\S+)\]`)
 
 // mustJSON marshals v to json.RawMessage, failing the test on error.
 func mustJSON(t *testing.T, v any) json.RawMessage {
@@ -115,20 +118,12 @@ func TestBashExecutor(t *testing.T) {
 		assert.Contains(t, text, "Showing last")
 		assert.Contains(t, text, "Full output:")
 
-		found := false
-		for _, line := range strings.Split(text, "\n") {
-			if strings.Contains(line, "Full output:") {
-				path := strings.TrimSpace(strings.Split(line, "Full output:")[1])
-				path = strings.TrimSuffix(path, "]")
-				path = strings.TrimSpace(path)
-				t.Cleanup(func() { os.Remove(path) })
-				_, statErr := os.Stat(path)
-				assert.NoError(t, statErr, "temp file should exist")
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "should have found and verified temp file path")
+		matches := fullOutputRe.FindStringSubmatch(text)
+		require.NotEmpty(t, matches, "should contain Full output path")
+		path := matches[1]
+		t.Cleanup(func() { os.Remove(path) })
+		_, statErr := os.Stat(path)
+		assert.NoError(t, statErr, "temp file should exist")
 	})
 
 	t.Run("returns error for invalid JSON args", func(t *testing.T) {
@@ -187,6 +182,34 @@ func TestBashExecutor(t *testing.T) {
 		assert.True(t, result.IsError)
 		text := resultText(t, result)
 		assert.Contains(t, text, "context canceled")
+	})
+
+	t.Run("auto-backgrounds command on timeout", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "echo started && sleep 30",
+			"timeout": 200,
+		}))
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		text := resultText(t, result)
+		assert.Contains(t, text, "backgrounded")
+		assert.Contains(t, text, "check_pid")
+
+		// Extract PID and kill the background process.
+		re := regexp.MustCompile(`pid (\d+)`)
+		matches := re.FindStringSubmatch(text)
+		require.NotEmpty(t, matches, "should contain pid")
+		pid, err := strconv.Atoi(matches[1])
+		require.NoError(t, err)
+
+		killResult, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"kill_pid": pid,
+		}))
+		require.NoError(t, err)
+		killText := resultText(t, killResult)
+		assert.Contains(t, killText, "killed")
 	})
 
 	t.Run("returns error for missing command", func(t *testing.T) {
