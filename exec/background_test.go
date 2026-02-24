@@ -169,7 +169,8 @@ func TestBackgroundExecution(t *testing.T) {
 }
 
 // pollUntilDone polls check_pid until the process reports completion.
-// Returns the final check_pid result text.
+// Returns the final check_pid result text. Single-use per pid: check_pid
+// removes completed processes from the registry.
 func pollUntilDone(t *testing.T, e *pipeexec.BashExecutor, pid int) string {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
