@@ -868,12 +868,9 @@ func TestExecuteBash(t *testing.T) {
 	t.Run("offloads to file when output exceeds byte threshold", func(t *testing.T) {
 		t.Parallel()
 		// Generate output larger than DefaultMaxBytes (50KB).
-		// 100-char lines × 1000 = 100KB > 50KB threshold.
+		// printf repeats a 100-byte line 1000 times = 100KB > 50KB threshold.
 		result, err := pipeexec.ExecuteBash(context.Background(), mustJSON(t, map[string]any{
-			"command": `python3 -c "
-for i in range(1000):
-    print('x' * 99)
-"`,
+			"command": `for i in $(seq 1 1000); do printf '%099d\n' $i; done`,
 		}))
 		require.NoError(t, err)
 		require.False(t, result.IsError)
@@ -1825,12 +1822,12 @@ There are 8 occurrences across the test file (lines 20, 37, 53, 70, 91, 107,
 Run: `go test ./cmd/pipe/ -v && go test ./... -v`
 Expected: all PASS
 
-**Step 4: Run `make validate`**
+**Step 5: Run `make validate`**
 
 Run: `make validate`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add cmd/pipe/tools.go cmd/pipe/tools_test.go cmd/pipe/main.go
