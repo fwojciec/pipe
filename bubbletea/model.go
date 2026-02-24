@@ -272,14 +272,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.allExpanded = !m.allExpanded
-		msg := SetCollapsedMsg{Collapsed: !m.allExpanded}
+		setMsg := SetCollapsedMsg{Collapsed: !m.allExpanded}
 		for i, block := range m.blocks {
 			// Skip error results — they always stay expanded.
 			if tr, ok := block.(*ToolResultBlock); ok && tr.IsError() {
 				continue
 			}
 			if isCollapsible(block) {
-				m.blocks[i], _ = block.Update(msg)
+				m.blocks[i], _ = block.Update(setMsg)
 			}
 		}
 		m.Viewport.SetContent(m.renderContent())
