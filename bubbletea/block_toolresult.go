@@ -31,9 +31,25 @@ func NewToolResultBlock(toolName, content string, isError bool, styles Styles) *
 	}
 }
 
+// IsError reports whether this tool result represents an error.
+func (b *ToolResultBlock) IsError() bool { return b.isError }
+
 func (b *ToolResultBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
-	if _, ok := msg.(ToggleMsg); ok {
+	switch msg := msg.(type) {
+	case ToggleMsg:
+		if b.isError {
+			// Error results are always expanded.
+			b.collapsed = false
+			break
+		}
 		b.collapsed = !b.collapsed
+	case SetCollapsedMsg:
+		if b.isError {
+			// Error results are always expanded.
+			b.collapsed = false
+			break
+		}
+		b.collapsed = msg.Collapsed
 	}
 	return b, nil
 }

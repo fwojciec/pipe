@@ -55,13 +55,14 @@ type Model struct {
 
 	windowHeight int // stored for viewport recomputation on InputHeightMsg
 
-	mouseEnabled bool
-	running      bool
-	cancel       context.CancelFunc
-	eventCh      chan pipe.Event
-	doneCh       chan error
-	err          error
-	ready        bool
+	allExpanded bool
+
+	running bool
+	cancel  context.CancelFunc
+	eventCh chan pipe.Event
+	doneCh  chan error
+	err     error
+	ready   bool
 }
 
 // New creates a new TUI Model with the given agent function, session, theme, and config.
@@ -83,7 +84,6 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme, config Config) 
 		styles:         NewStyles(theme),
 		config:         config,
 		blockFocus:     -1,
-		mouseEnabled:   false,
 		activeText:     make(map[int]*AssistantTextBlock),
 		activeThinking: make(map[int]*ThinkingBlock),
 		activeToolCall: make(map[string]*ToolCallBlock),
@@ -95,9 +95,6 @@ func (m Model) Running() bool { return m.running }
 
 // Err returns the last error, if any.
 func (m Model) Err() error { return m.err }
-
-// MouseEnabled returns whether mouse capture is active.
-func (m Model) MouseEnabled() bool { return m.mouseEnabled }
 
 // SetRunning is a test helper that puts the model in a running state.
 func SetRunning(m Model) (Model, tea.Cmd) {
@@ -159,12 +156,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
-	case tea.MouseMsg:
-		// Route mouse events to viewport only. The input component does not
-		// need mouse events, and passing them through could cause issues.
-		var cmd tea.Cmd
-		m.Viewport, cmd = m.Viewport.Update(msg)
-		return m, cmd
 	}
 
 	// Pass remaining messages to sub-components.
@@ -275,28 +266,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Viewport.SetContent(m.renderContent())
 		}
 		return m, nil
+
+	case tea.KeyCtrlO:
+		if m.running {
+			return m, nil
+		}
+		m.allExpanded = !m.allExpanded
+		msg := SetCollapsedMsg{Collapsed: !m.allExpanded}
+		for i, block := range m.blocks {
+			// Skip error results — they always stay expanded.
+			if tr, ok := block.(*ToolResultBlock); ok && tr.IsError() {
+				continue
+			}
+			if isCollapsible(block) {
+				m.blocks[i], _ = block.Update(msg)
+			}
+		}
+		m.Viewport.SetContent(m.renderContent())
+		return m, nil
 	}
 
 	// When idle, pass keys to both textarea (for typing) and viewport
 	// (for scrolling). Only forward non-character keys to viewport to avoid
 	// conflicts (e.g. 'j'/'k' are viewport scroll AND text characters).
 	if !m.running {
-		// Discard SGR mouse escape sequence fragments that leak through
-		// when Bubble Tea's input parser splits a mouse sequence across
-		// read buffer boundaries. The body looks like <64;56;37M.
-		if m.mouseEnabled && msg.Type == tea.KeyRunes && !msg.Paste && isMouseSGRFragment(msg.Runes) {
-			return m, nil
-		}
-
-		// Alt+M toggles mouse capture for native text selection.
-		if msg.Type == tea.KeyRunes && msg.Alt && len(msg.Runes) == 1 && msg.Runes[0] == 'm' {
-			m.mouseEnabled = !m.mouseEnabled
-			if m.mouseEnabled {
-				return m, tea.EnableMouseCellMotion
-			}
-			return m, tea.DisableMouse
-		}
-
 		var cmd tea.Cmd
 		var cmds []tea.Cmd
 
@@ -404,6 +397,16 @@ func (m Model) renderContent() string {
 	return b.String()
 }
 
+// isCollapsible reports whether b is a collapsible block (thinking, tool call, or tool result).
+func isCollapsible(b MessageBlock) bool {
+	switch b.(type) {
+	case *ThinkingBlock, *ToolCallBlock, *ToolResultBlock:
+		return true
+	default:
+		return false
+	}
+}
+
 // isToolBlock reports whether b is a tool call or tool result block.
 func isToolBlock(b MessageBlock) bool {
 	switch b.(type) {
@@ -458,6 +461,9 @@ func (m Model) processEvent(evt pipe.Event) Model {
 			b.Append(e.Delta)
 		} else {
 			b := NewThinkingBlock(m.styles)
+			if m.allExpanded {
+				b.Update(SetCollapsedMsg{Collapsed: false})
+			}
 			b.Append(e.Delta)
 			m.blocks = append(m.blocks, b)
 			m.activeThinking[e.Index] = b
@@ -466,6 +472,9 @@ func (m Model) processEvent(evt pipe.Event) Model {
 	case pipe.EventToolCallBegin:
 		m.hadToolCalls = true
 		b := NewToolCallBlock(e.Name, e.ID, m.styles)
+		if m.allExpanded {
+			b.Update(SetCollapsedMsg{Collapsed: false})
+		}
 		m.blocks = append(m.blocks, b)
 		m.activeToolCall[e.ID] = b
 		m = m.updateBlockFocus()
@@ -478,7 +487,11 @@ func (m Model) processEvent(evt pipe.Event) Model {
 			b.FinalizeWithCall(e.Call)
 		}
 	case pipe.EventToolResult:
-		m.blocks = append(m.blocks, NewToolResultBlock(e.ToolName, e.Content, e.IsError, m.styles))
+		b := NewToolResultBlock(e.ToolName, e.Content, e.IsError, m.styles)
+		if m.allExpanded && !e.IsError {
+			b.Update(SetCollapsedMsg{Collapsed: false})
+		}
+		m.blocks = append(m.blocks, b)
 		m = m.updateBlockFocus()
 	}
 	return m
@@ -490,8 +503,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 func (m Model) updateBlockFocus() Model {
 	m.blockFocus = -1
 	for i := len(m.blocks) - 1; i >= 0; i-- {
-		switch m.blocks[i].(type) {
-		case *ThinkingBlock, *ToolCallBlock, *ToolResultBlock:
+		if isCollapsible(m.blocks[i]) {
 			m.blockFocus = i
 			return m
 		}
@@ -507,8 +519,7 @@ func (m Model) cycleFocusPrev() Model {
 	}
 	for i := range len(m.blocks) {
 		idx := (start - i + len(m.blocks)) % len(m.blocks)
-		switch m.blocks[idx].(type) {
-		case *ThinkingBlock, *ToolCallBlock, *ToolResultBlock:
+		if isCollapsible(m.blocks[idx]) {
 			m.blockFocus = idx
 			return m
 		}
@@ -677,30 +688,4 @@ func listenForEvent(ch <-chan pipe.Event, doneCh <-chan error) tea.Cmd {
 		}
 		return StreamEventMsg{Event: evt}
 	}
-}
-
-// isMouseSGRFragment returns true if runes match the body of a split SGR
-// mouse escape sequence: <button;col;row(M|m). When Bubble Tea's input
-// reader splits an SGR sequence across buffer boundaries, the \x1b[ prefix
-// is consumed and the remaining <digits;digits;digits[Mm] arrives as a
-// regular KeyRunes message.
-func isMouseSGRFragment(runes []rune) bool {
-	n := len(runes)
-	if n < 7 || runes[0] != '<' {
-		return false
-	}
-	last := runes[n-1]
-	if last != 'M' && last != 'm' {
-		return false
-	}
-	// Middle characters must be digits or semicolons, with at least two semicolons.
-	semis := 0
-	for _, r := range runes[1 : n-1] {
-		if r == ';' {
-			semis++
-		} else if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return semis == 2
 }

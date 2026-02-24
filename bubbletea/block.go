@@ -13,3 +13,7 @@ type MessageBlock interface {
 // ToggleMsg tells a collapsible block to toggle its collapsed state.
 // Sent by the root model when the user presses the toggle key on a focused block.
 type ToggleMsg struct{}
+
+// SetCollapsedMsg tells a collapsible block to set its collapsed state directly.
+// Sent by the root model when Ctrl+O toggles all blocks globally.
+type SetCollapsedMsg struct{ Collapsed bool }

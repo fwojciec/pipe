@@ -27,8 +27,11 @@ func (b *ThinkingBlock) Append(text string) {
 }
 
 func (b *ThinkingBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
-	if _, ok := msg.(ToggleMsg); ok {
+	switch msg := msg.(type) {
+	case ToggleMsg:
 		b.collapsed = !b.collapsed
+	case SetCollapsedMsg:
+		b.collapsed = msg.Collapsed
 	}
 	return b, nil
 }

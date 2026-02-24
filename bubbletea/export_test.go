@@ -9,3 +9,8 @@ func BlockSeparator(prev, curr MessageBlock) string {
 func RenderContent(m Model) string {
 	return m.renderContent()
 }
+
+// AllExpanded returns whether all collapsible blocks are in expanded state.
+func AllExpanded(m Model) bool {
+	return m.allExpanded
+}

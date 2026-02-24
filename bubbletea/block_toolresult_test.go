@@ -73,18 +73,29 @@ func TestToolResultBlock_View(t *testing.T) {
 		assert.Contains(t, view, "second line")
 	})
 
-	t.Run("toggle collapses expanded error result", func(t *testing.T) {
+	t.Run("toggle does not collapse expanded error result", func(t *testing.T) {
 		t.Parallel()
 		styles := bt.NewStyles(pipe.DefaultTheme())
 		block := bt.NewToolResultBlock("bash", "error details\nmore info", true, styles)
 		// Starts expanded.
 		assert.Contains(t, block.View(80), "more info")
-		// Toggle to collapse.
+		// Toggle should keep it expanded.
 		updated, _ := block.Update(bt.ToggleMsg{})
 		view := updated.(*bt.ToolResultBlock).View(80)
 		stripped := ansi.Strip(view)
-		assert.NotContains(t, stripped, "more info")
-		assert.Contains(t, stripped, "error details")
+		assert.Contains(t, stripped, "more info")
+		assert.Contains(t, stripped, "▼")
+	})
+
+	t.Run("set collapsed does not collapse error result", func(t *testing.T) {
+		t.Parallel()
+		styles := bt.NewStyles(pipe.DefaultTheme())
+		block := bt.NewToolResultBlock("bash", "error details\nmore info", true, styles)
+		updated, _ := block.Update(bt.SetCollapsedMsg{Collapsed: true})
+		view := updated.(*bt.ToolResultBlock).View(80)
+		stripped := ansi.Strip(view)
+		assert.Contains(t, stripped, "more info")
+		assert.Contains(t, stripped, "▼")
 	})
 
 	t.Run("expanded shows header without preview and full content", func(t *testing.T) {

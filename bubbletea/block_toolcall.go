@@ -41,8 +41,11 @@ func (b *ToolCallBlock) FinalizeWithCall(call pipe.ToolCallBlock) {
 }
 
 func (b *ToolCallBlock) Update(msg tea.Msg) (MessageBlock, tea.Cmd) {
-	if _, ok := msg.(ToggleMsg); ok {
+	switch msg := msg.(type) {
+	case ToggleMsg:
 		b.collapsed = !b.collapsed
+	case SetCollapsedMsg:
+		b.collapsed = msg.Collapsed
 	}
 	return b, nil
 }

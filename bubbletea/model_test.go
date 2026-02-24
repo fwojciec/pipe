@@ -537,188 +537,136 @@ func TestModel_SessionReloadBlockFocus(t *testing.T) {
 	})
 }
 
-func TestModel_MouseToggle(t *testing.T) {
+func TestModel_GlobalToggle(t *testing.T) {
 	t.Parallel()
 
-	t.Run("mouse disabled by default", func(t *testing.T) {
+	t.Run("ctrl+o expands all non-error collapsible blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		assert.False(t, m.MouseEnabled())
+		// Create thinking + tool call + success tool result (all start collapsed).
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "deep thoughts"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "answer"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "read"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "read", Content: "file data\nsecond line", IsError: false}})
+		// All collapsed — content hidden.
+		assert.NotContains(t, m.View(), "deep thoughts")
+		assert.NotContains(t, m.View(), "second line")
+		// Ctrl+O expands all.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.True(t, bt.AllExpanded(m))
+		assert.Contains(t, m.View(), "deep thoughts")
+		assert.Contains(t, m.View(), "second line")
 	})
 
-	t.Run("alt+m toggles mouse on", func(t *testing.T) {
+	t.Run("ctrl+o again collapses all non-error collapsible blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.True(t, m.MouseEnabled())
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "thoughts"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "answer"}})
+		// Expand all.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.Contains(t, m.View(), "thoughts")
+		// Collapse all.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.False(t, bt.AllExpanded(m))
+		assert.NotContains(t, m.View(), "thoughts")
 	})
 
-	t.Run("alt+m twice toggles mouse back off", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.False(t, m.MouseEnabled())
-	})
-
-	t.Run("alt+m returns enable then disable commands", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-
-		// First toggle: enable mouse.
-		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		m = updated.(bt.Model)
-		require.NotNil(t, cmd)
-		enableMsg := cmd()
-		enableType := fmt.Sprintf("%T", enableMsg)
-
-		// Second toggle: disable mouse.
-		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		require.NotNil(t, cmd)
-		disableMsg := cmd()
-		disableType := fmt.Sprintf("%T", disableMsg)
-
-		// The two commands should produce different message types.
-		assert.NotEqual(t, enableType, disableType)
-	})
-
-	t.Run("alt+m during agent run is ignored", func(t *testing.T) {
+	t.Run("ctrl+o during running is ignored", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 		m, _ = bt.SetRunning(m)
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		// Mouse should still be disabled — toggle was ignored.
-		assert.False(t, m.MouseEnabled())
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.False(t, bt.AllExpanded(m))
 	})
 
-	t.Run("submit preserves mouse enabled state", func(t *testing.T) {
+	t.Run("ctrl+o with no collapsible blocks flips allExpanded without panic", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Enable mouse.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		assert.True(t, m.MouseEnabled())
-		// Type and submit.
-		m.Input.SetValue("hello")
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-		assert.True(t, m.MouseEnabled())
-	})
-
-	t.Run("submit preserves mouse disabled state", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Mouse disabled by default.
-		assert.False(t, m.MouseEnabled())
-		// Type and submit.
-		m.Input.SetValue("hello")
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
-		assert.False(t, m.MouseEnabled())
-	})
-
-}
-
-func TestModel_MouseEscapeFilter(t *testing.T) {
-	t.Parallel()
-
-	t.Run("mouse message does not reach input", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// tea.MouseMsg is routed to viewport only (separate case in Update),
-		// independent of mouseEnabled state.
-		m = updateModel(t, m, tea.MouseMsg{
-			Button: tea.MouseButtonWheelDown,
-			Action: tea.MouseActionPress,
-			X:      10, Y: 5,
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventTextDelta{Index: 0, Delta: "just text"}})
+		assert.NotPanics(t, func() {
+			m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 		})
-		assert.Empty(t, m.Input.Value())
+		assert.True(t, bt.AllExpanded(m))
 	})
 
-	t.Run("SGR mouse body fragment does not reach input when mouse enabled", func(t *testing.T) {
+	t.Run("tab does not collapse error tool result", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Enable mouse capture.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		// Simulates the body of a split SGR mouse sequence: <64;56;37M
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<64;56;37M"),
-		})
-		assert.Empty(t, m.Input.Value())
+		// Error tool result starts expanded.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "error output\ndetails", IsError: true}})
+		assert.Contains(t, m.View(), "details")
+		// Tab should keep it expanded.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.Contains(t, m.View(), "details")
 	})
 
-	t.Run("SGR mouse release fragment does not reach input when mouse enabled", func(t *testing.T) {
+	t.Run("new tool call block inherits expanded state", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Enable mouse capture.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		// SGR release events end with lowercase 'm'.
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<35;10;20m"),
-		})
-		assert.Empty(t, m.Input.Value())
+		// Set allExpanded via Ctrl+O.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		require.True(t, bt.AllExpanded(m))
+		// New tool call should start expanded (not collapsed).
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-1", Delta: `{"path":"/tmp"}`}})
+		assert.Contains(t, m.View(), `{"path":"/tmp"}`)
 	})
 
-	t.Run("normal text still reaches input", func(t *testing.T) {
+	t.Run("new thinking block inherits expanded state", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m.Input = typeInputString(t, m.Input, "hello")
-		assert.Equal(t, "hello", m.Input.Value())
+		// Set allExpanded via Ctrl+O.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		require.True(t, bt.AllExpanded(m))
+		// New thinking block should start expanded.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "pondering"}})
+		assert.Contains(t, m.View(), "pondering")
 	})
 
-	t.Run("too few semicolons is not a mouse fragment", func(t *testing.T) {
+	t.Run("new error tool result stays expanded even when allExpanded is false", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<64;56M"),
-		})
-		assert.Equal(t, "<64;56M", m.Input.Value())
+		assert.False(t, bt.AllExpanded(m))
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "error output\ndetails", IsError: true}})
+		// Error result always starts expanded.
+		assert.Contains(t, m.View(), "details")
 	})
 
-	t.Run("too many semicolons is not a mouse fragment", func(t *testing.T) {
+	t.Run("ctrl+o collapse skips error tool result blocks", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<1;2;3;4M"),
-		})
-		assert.Equal(t, "<1;2;3;4M", m.Input.Value())
+		// Create error tool result (starts expanded).
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "error output\ndetails", IsError: true}})
+		// Also add a thinking block.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "hmm"}})
+		// Expand all.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.Contains(t, m.View(), "details")
+		assert.Contains(t, m.View(), "hmm")
+		// Collapse all — error result should stay expanded.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.Contains(t, m.View(), "details")
+		assert.NotContains(t, m.View(), "hmm")
 	})
 
-	t.Run("non-digit middle chars are not a mouse fragment", func(t *testing.T) {
+	t.Run("per-item tab still works after global toggle", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<a;b;cM"),
-		})
-		assert.Equal(t, "<a;b;cM", m.Input.Value())
-	})
-
-	t.Run("minimum valid mouse fragment is filtered when mouse enabled", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Enable mouse capture.
-		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<0;0;0M"),
-		})
-		assert.Empty(t, m.Input.Value())
-	})
-
-	t.Run("mouse fragment passes through when mouse disabled", func(t *testing.T) {
-		t.Parallel()
-		m := initModel(t, nopAgent)
-		// Mouse disabled by default.
-		require.False(t, m.MouseEnabled())
-		// SGR fragment should pass through when mouse is disabled since
-		// the terminal is not sending mouse events in that mode.
-		m = updateModel(t, m, tea.KeyMsg{
-			Type:  tea.KeyRunes,
-			Runes: []rune("<64;56;37M"),
-		})
-		assert.Equal(t, "<64;56;37M", m.Input.Value())
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "inner thoughts"}})
+		// Expand all.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.Contains(t, m.View(), "inner thoughts")
+		// Tab on focused block collapses it individually.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.NotContains(t, m.View(), "inner thoughts")
 	})
 }
 
