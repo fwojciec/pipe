@@ -275,6 +275,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		setMsg := SetCollapsedMsg{Collapsed: !m.allExpanded}
 		for i, block := range m.blocks {
 			// Skip error results — they always stay expanded.
+			// ToolResultBlock.Update also enforces this, but we skip here to
+			// avoid even sending the message, keeping both layers in sync.
 			if tr, ok := block.(*ToolResultBlock); ok && tr.IsError() {
 				continue
 			}
