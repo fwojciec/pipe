@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -740,15 +741,28 @@ func TestModel_StatusBar(t *testing.T) {
 		m.Input.SetValue("hello")
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 		view := m.View()
-		// Spinner.Dot first frame is ⣾; appears before the path.
-		assert.Contains(t, view, "⣾")
+		// Use the library's first frame so the test stays in sync with Bubbles.
+		assert.Contains(t, view, spinner.Dot.Frames[0])
 	})
 
 	t.Run("no spinner when idle", func(t *testing.T) {
 		t.Parallel()
 		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
 		view := m.View()
-		assert.NotContains(t, view, "⣾")
+		assert.NotContains(t, view, spinner.Dot.Frames[0])
+	})
+
+	t.Run("no spinner after agent completes", func(t *testing.T) {
+		t.Parallel()
+		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
+		m.Input.SetValue("hello")
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+		require.True(t, m.Running())
+		// Agent finishes.
+		m = updateModel(t, m, bt.AgentDoneMsg{})
+		require.False(t, m.Running())
+		view := m.View()
+		assert.NotContains(t, view, spinner.Dot.Frames[0])
 	})
 
 	t.Run("narrow terminal does not panic and fits width", func(t *testing.T) {
