@@ -142,7 +142,20 @@ func TestBashExecutor(t *testing.T) {
 		require.NoError(t, err)
 		text := resultText(t, result)
 		assert.NotContains(t, text, "stdout:")
-		assert.Contains(t, text, "stderr:")
+		assert.Contains(t, text, "stderr:\nerr\n")
+	})
+
+	t.Run("executes simple command", func(t *testing.T) {
+		t.Parallel()
+		e := pipeexec.NewBashExecutor()
+		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
+			"command": "echo hello",
+		}))
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		text := resultText(t, result)
+		assert.Contains(t, text, "stdout:\nhello\n")
+		assert.Contains(t, text, "exit code: 0")
 	})
 
 	t.Run("returns error for missing command", func(t *testing.T) {
