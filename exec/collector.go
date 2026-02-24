@@ -124,6 +124,8 @@ func (c *OutputCollector) Err() error {
 }
 
 // Close closes the temp file if one was created. Subsequent writes are no-ops.
+// The rolling buffer and counters remain readable after Close — callers may
+// call Bytes(), TotalNewlines(), FilePath(), etc. on a closed collector.
 func (c *OutputCollector) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

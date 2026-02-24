@@ -14,6 +14,183 @@ import (
 	"github.com/fwojciec/pipe"
 )
 
+// bashExecutorArgs extends bashArgs with background management parameters.
+type bashExecutorArgs struct {
+	Command  string `json:"command"`
+	Timeout  int    `json:"timeout"`
+	CheckPID int    `json:"check_pid"`
+	KillPID  int    `json:"kill_pid"`
+}
+
+// BashExecutorTool returns the tool definition with background parameters.
+func BashExecutorTool() pipe.Tool {
+	return pipe.Tool{
+		Name: "bash",
+		Description: fmt.Sprintf(
+			"Execute a bash command. Output truncated to last %d lines or %dKB; "+
+				"if truncated, full output saved to temp file readable with the read tool. "+
+				"Commands exceeding timeout are auto-backgrounded.",
+			DefaultMaxLines, DefaultMaxBytes/1024,
+		),
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"command": {
+					"type": "string",
+					"description": "The bash command to execute"
+				},
+				"timeout": {
+					"type": "integer",
+					"description": "Timeout in milliseconds before auto-backgrounding (default: 120000)"
+				},
+				"check_pid": {
+					"type": "integer",
+					"description": "Check on a backgrounded process and return new output"
+				},
+				"kill_pid": {
+					"type": "integer",
+					"description": "Kill a backgrounded process and return final output"
+				}
+			}
+		}`),
+	}
+}
+
+// BashExecutor executes bash commands with background process management.
+type BashExecutor struct {
+	bg *BackgroundRegistry
+}
+
+// NewBashExecutor creates a BashExecutor with a fresh background registry.
+func NewBashExecutor() *BashExecutor {
+	return &BashExecutor{bg: NewBackgroundRegistry()}
+}
+
+// Execute runs a bash command or manages a background process.
+func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, error) {
+	var a bashExecutorArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return domainError(fmt.Sprintf("invalid arguments: %s", err)), nil
+	}
+
+	switch {
+	case a.CheckPID > 0:
+		return e.bg.Check(a.CheckPID)
+	case a.KillPID > 0:
+		return e.bg.Kill(a.KillPID)
+	case a.Command != "":
+		return e.runCommand(ctx, a)
+	default:
+		return domainError("one of command, check_pid, or kill_pid is required"), nil
+	}
+}
+
+func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pipe.ToolResult, error) {
+	timeout := 120 * time.Second
+	if a.Timeout > 0 {
+		timeout = time.Duration(a.Timeout) * time.Millisecond
+	}
+
+	// Use exec.Command (not CommandContext) so timeout doesn't auto-kill —
+	// we want to auto-background instead.
+	cmd := osexec.Command("bash", "-c", a.Command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return domainError(fmt.Sprintf("failed to create stdout pipe: %s", err)), nil
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return domainError(fmt.Sprintf("failed to create stderr pipe: %s", err)), nil
+	}
+
+	if err := cmd.Start(); err != nil {
+		return domainError(fmt.Sprintf("failed to start command: %s", err)), nil
+	}
+
+	stdoutC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
+	stderrC := NewOutputCollector(int64(DefaultMaxBytes), rollingBufSize)
+
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { _, _ = io.Copy(stdoutC, stdoutPipe); close(stdoutDone) }()
+	go func() { _, _ = io.Copy(stderrC, stderrPipe); close(stderrDone) }()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	select {
+	case waitErr := <-waitCh:
+		// Process completed before timeout.
+		<-stdoutDone
+		<-stderrDone
+		stdoutC.Close()
+		stderrC.Close()
+		return e.formatCompletedResult(waitErr, stdoutC, stderrC), nil
+
+	case <-timer.C:
+		// Timeout: auto-background.
+		pid := cmd.Process.Pid
+		bg := &BackgroundProcess{
+			cmd:        cmd,
+			stdout:     stdoutC,
+			stderr:     stderrC,
+			waitCh:     waitCh,
+			stdoutDone: stdoutDone,
+			stderrDone: stderrDone,
+		}
+		go bg.watch()
+		e.bg.Register(pid, bg)
+
+		stdoutStr, _ := processOutput(stdoutC)
+		stderrStr, _ := processOutput(stderrC)
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "[Command backgrounded after %s timeout (pid %d).\n", timeout, pid)
+		if stdoutStr != "" {
+			fmt.Fprintf(&b, "\nstdout (partial):\n%s\n", stdoutStr)
+		}
+		if stderrStr != "" {
+			fmt.Fprintf(&b, "\nstderr (partial):\n%s\n", stderrStr)
+		}
+		b.WriteString("\nUse check_pid or kill_pid to manage.]")
+
+		return &pipe.ToolResult{
+			Content: []pipe.ContentBlock{pipe.TextBlock{Text: b.String()}},
+			IsError: false,
+		}, nil
+
+	case <-ctx.Done():
+		// External cancellation: kill.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-waitCh
+		<-stdoutDone
+		<-stderrDone
+		stdoutC.Close()
+		stderrC.Close()
+		return domainError(fmt.Sprintf("command cancelled: %s", ctx.Err())), nil
+	}
+}
+
+func (e *BashExecutor) formatCompletedResult(waitErr error, stdout, stderr *OutputCollector) *pipe.ToolResult {
+	exitCode := 0
+	isError := false
+	if waitErr != nil {
+		isError = true
+		var exitErr *osexec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+	return formatResult(exitCode, isError, stdout, stderr)
+}
+
 type bashArgs struct {
 	Command string `json:"command"`
 	Timeout int    `json:"timeout"` // milliseconds
@@ -121,7 +298,9 @@ func ExecuteBash(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, e
 }
 
 // processOutput sanitizes and truncates collector output. Returns the processed
-// string and truncation metadata.
+// string and truncation metadata. For running processes, this returns a snapshot;
+// the collector's Bytes() and TotalNewlines() calls are independently locked, so
+// the line count may be slightly inconsistent with the content.
 func processOutput(c *OutputCollector) (string, TruncateResult) {
 	raw := string(c.Bytes())
 	clean := Sanitize(raw)
