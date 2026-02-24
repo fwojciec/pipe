@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -57,6 +58,7 @@ type Model struct {
 
 	allExpanded bool
 
+	spinner spinner.Model
 	running bool
 	cancel  context.CancelFunc
 	eventCh chan pipe.Event
@@ -76,13 +78,18 @@ func New(run AgentFunc, session *pipe.Session, theme pipe.Theme, config Config) 
 	ta.CheckInputComplete = func(_ string) bool { return true }
 	ta.Focus()
 
+	s := spinner.New(spinner.WithSpinner(spinner.Dot))
+	styles := NewStyles(theme)
+	s.Style = styles.Accent
+
 	return Model{
 		Input:          ta,
 		run:            run,
 		session:        session,
 		theme:          theme,
-		styles:         NewStyles(theme),
+		styles:         styles,
 		config:         config,
+		spinner:        s,
 		blockFocus:     -1,
 		activeText:     make(map[int]*AssistantTextBlock),
 		activeThinking: make(map[int]*ThinkingBlock),
@@ -163,7 +170,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.Viewport, cmd = m.Viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
-	if !m.running {
+	if m.running {
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+	} else {
 		m.Input, cmd = m.Input.Update(msg)
 		cmds = append(cmds, cmd)
 	}
@@ -273,9 +283,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyCtrlO:
-		if m.running {
-			return m, nil
-		}
 		m.allExpanded = !m.allExpanded
 		setMsg := SetCollapsedMsg{Collapsed: !m.allExpanded}
 		var cmds []tea.Cmd
@@ -350,6 +357,7 @@ func (m Model) submitInput(text string) (tea.Model, tea.Cmd) {
 	m.Input.Blur()
 
 	return m, tea.Batch(
+		m.spinner.Tick,
 		startAgent(m.run, ctx, m.session, m.eventCh, m.doneCh),
 		listenForEvent(m.eventCh, m.doneCh),
 	)
@@ -597,36 +605,31 @@ func (m Model) statusLine() string {
 		return lipgloss.NewStyle().Width(w).Render(content)
 	}
 
-	// Left: working directory + git branch.
-	left := m.styles.Muted.Render(m.config.WorkDir)
+	// Left: spinner (when running) + working directory + git branch.
+	left := ""
+	if m.running {
+		left = m.spinner.View() + " "
+	}
+	left += m.styles.Muted.Render(m.config.WorkDir)
 	if m.config.GitBranch != "" {
 		left += m.styles.Muted.Render(" ") + m.styles.Accent.Render(m.config.GitBranch)
-	}
-
-	// Center: activity indicator when running.
-	center := ""
-	if m.running {
-		center = m.styles.Accent.Render("●")
 	}
 
 	// Right: model name.
 	right := m.styles.Muted.Render(m.config.ModelName)
 
-	// Layout: left | center | right, padded to fill width.
+	// Layout: left ... right, padded to fill width.
 	// Truncate left and right to fit within available width.
 	leftW := lipgloss.Width(left)
-	centerW := lipgloss.Width(center)
 	rightW := lipgloss.Width(right)
 
 	minGaps := 0
-	if centerW > 0 {
-		minGaps = 2 // one gap on each side of center
-	} else if leftW > 0 && rightW > 0 {
+	if leftW > 0 && rightW > 0 {
 		minGaps = 1
 	}
 
 	// Truncate content to fit within terminal width.
-	available := w - centerW - minGaps
+	available := w - minGaps
 	if leftW+rightW > available {
 		// Give right side at most half, left gets the rest.
 		maxRight := available / 2
@@ -641,20 +644,6 @@ func (m Model) statusLine() string {
 		}
 	}
 
-	if centerW > 0 {
-		// Center the indicator, pad left and right.
-		gapLeft := w/2 - leftW - centerW/2
-		gapRight := w - leftW - gapLeft - centerW - rightW
-		if gapLeft < 0 {
-			gapLeft = 0
-		}
-		if gapRight < 0 {
-			gapRight = 0
-		}
-		return left + strings.Repeat(" ", gapLeft) + center + strings.Repeat(" ", gapRight) + right
-	}
-
-	// No center content: left ... right.
 	gap := w - leftW - rightW
 	if gap < 0 {
 		gap = 0

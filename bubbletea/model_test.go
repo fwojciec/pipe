@@ -573,12 +573,12 @@ func TestModel_GlobalToggle(t *testing.T) {
 		assert.NotContains(t, m.View(), "thoughts")
 	})
 
-	t.Run("ctrl+o during running is ignored", func(t *testing.T) {
+	t.Run("ctrl+o during running toggles expand", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 		m, _ = bt.SetRunning(m)
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
-		assert.False(t, bt.AllExpanded(m))
+		assert.True(t, bt.AllExpanded(m))
 	})
 
 	t.Run("ctrl+o with no collapsible blocks flips allExpanded without panic", func(t *testing.T) {
@@ -734,20 +734,21 @@ func TestModel_StatusBar(t *testing.T) {
 		assert.Contains(t, view, "claude-opus")
 	})
 
-	t.Run("displays activity indicator when running", func(t *testing.T) {
+	t.Run("displays spinner when running", func(t *testing.T) {
 		t.Parallel()
 		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
 		m.Input.SetValue("hello")
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyEnter})
 		view := m.View()
-		assert.Contains(t, view, "●")
+		// Spinner.Dot first frame is ⣾; appears before the path.
+		assert.Contains(t, view, "⣾")
 	})
 
-	t.Run("no activity indicator when idle", func(t *testing.T) {
+	t.Run("no spinner when idle", func(t *testing.T) {
 		t.Parallel()
 		m := initModelWithConfig(t, nopAgent, bt.Config{ModelName: "claude-opus"})
 		view := m.View()
-		assert.NotContains(t, view, "●")
+		assert.NotContains(t, view, "⣾")
 	})
 
 	t.Run("narrow terminal does not panic and fits width", func(t *testing.T) {
