@@ -638,16 +638,18 @@ func TestModel_GlobalToggle(t *testing.T) {
 		assert.Contains(t, m.View(), "details")
 	})
 
-	t.Run("new error tool result stays expanded when allExpanded is true", func(t *testing.T) {
+	t.Run("new error tool result stays expanded after allExpanded toggled off", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
-		// Set allExpanded via Ctrl+O.
+		// Toggle allExpanded on then off so it's explicitly false.
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
 		require.True(t, bt.AllExpanded(m))
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		require.False(t, bt.AllExpanded(m))
+		// New error tool result should still render expanded.
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "error output\ndetails", IsError: true}})
-		// Error result stays expanded (not affected by allExpanded flag).
 		assert.Contains(t, m.View(), "details")
 	})
 
