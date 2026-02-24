@@ -253,6 +253,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyTab:
 		if !m.running && m.blockFocus >= 0 && m.blockFocus < len(m.blocks) {
+			// Error results never collapse, so skip the toggle entirely.
+			if tr, ok := m.blocks[m.blockFocus].(*ToolResultBlock); ok && tr.IsError() {
+				return m, nil
+			}
 			block, cmd := m.blocks[m.blockFocus].Update(ToggleMsg{})
 			m.blocks[m.blockFocus] = block
 			m.allExpanded = false

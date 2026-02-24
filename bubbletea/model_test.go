@@ -672,6 +672,25 @@ func TestModel_GlobalToggle(t *testing.T) {
 		assert.NotContains(t, m.View(), "hmm")
 	})
 
+	t.Run("tab on error result preserves allExpanded", func(t *testing.T) {
+		t.Parallel()
+		m := initModel(t, nopAgent)
+		// Create error tool result (focus lands on it).
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "bash"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallEnd{Call: pipe.ToolCallBlock{ID: "tc-1", Name: "bash"}}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolResult{ToolName: "bash", Content: "error output\ndetails", IsError: true}})
+		// Expand all via Ctrl+O.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		require.True(t, bt.AllExpanded(m))
+		// Tab on error result should not reset allExpanded.
+		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
+		assert.True(t, bt.AllExpanded(m))
+		assert.Contains(t, m.View(), "details")
+		// New blocks should still arrive expanded.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "pondering"}})
+		assert.Contains(t, m.View(), "pondering")
+	})
+
 	t.Run("per-item tab resets allExpanded so new blocks arrive collapsed", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
