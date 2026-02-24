@@ -31,6 +31,22 @@ func resultText(t *testing.T, r *pipe.ToolResult) string {
 	return text.Text
 }
 
+func TestBashExecutorTool(t *testing.T) {
+	t.Parallel()
+	tool := pipeexec.BashExecutorTool()
+	assert.Equal(t, "bash", tool.Name)
+	assert.NotEmpty(t, tool.Description)
+
+	var schema map[string]any
+	err := json.Unmarshal(tool.Parameters, &schema)
+	require.NoError(t, err)
+
+	props, ok := schema["properties"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, props, "command")
+	assert.Contains(t, props, "timeout")
+}
+
 func TestBashExecutor(t *testing.T) {
 	t.Parallel()
 
@@ -82,6 +98,7 @@ func TestBashExecutor(t *testing.T) {
 		require.False(t, result.IsError)
 		text := resultText(t, result)
 		assert.Contains(t, text, "Showing last")
+		assert.NotContains(t, text, "Full output:", "no file offload for line-only truncation")
 		assert.Contains(t, text, fmt.Sprintf("%d", pipeexec.DefaultMaxLines+1000))
 	})
 
@@ -169,7 +186,7 @@ func TestBashExecutor(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 		text := resultText(t, result)
-		assert.Contains(t, text, "cancel")
+		assert.Contains(t, text, "context canceled")
 	})
 
 	t.Run("returns error for missing command", func(t *testing.T) {
