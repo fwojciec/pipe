@@ -657,16 +657,22 @@ func TestModel_GlobalToggle(t *testing.T) {
 		assert.NotContains(t, m.View(), "hmm")
 	})
 
-	t.Run("per-item tab still works after global toggle", func(t *testing.T) {
+	t.Run("per-item tab resets allExpanded so new blocks arrive collapsed", func(t *testing.T) {
 		t.Parallel()
 		m := initModel(t, nopAgent)
 		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventThinkingDelta{Index: 0, Delta: "inner thoughts"}})
 		// Expand all.
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyCtrlO})
+		assert.True(t, bt.AllExpanded(m))
 		assert.Contains(t, m.View(), "inner thoughts")
-		// Tab on focused block collapses it individually.
+		// Tab on focused block collapses it individually and resets allExpanded.
 		m = updateModel(t, m, tea.KeyMsg{Type: tea.KeyTab})
 		assert.NotContains(t, m.View(), "inner thoughts")
+		assert.False(t, bt.AllExpanded(m))
+		// New blocks should arrive collapsed (default), not expanded.
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallBegin{ID: "tc-1", Name: "read"}})
+		m = updateModel(t, m, bt.StreamEventMsg{Event: pipe.EventToolCallDelta{ID: "tc-1", Delta: `{"path":"/tmp"}`}})
+		assert.NotContains(t, m.View(), `{"path":"/tmp"}`)
 	})
 }
 

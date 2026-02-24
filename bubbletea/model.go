@@ -255,6 +255,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.running && m.blockFocus >= 0 && m.blockFocus < len(m.blocks) {
 			block, cmd := m.blocks[m.blockFocus].Update(ToggleMsg{})
 			m.blocks[m.blockFocus] = block
+			m.allExpanded = false
 			m.Viewport.SetContent(m.renderContent())
 			return m, cmd
 		}
