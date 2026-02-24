@@ -14,6 +14,8 @@ import (
 	"github.com/fwojciec/pipe"
 )
 
+const rollingBufSize = 2 * DefaultMaxBytes // 100KB rolling buffer
+
 // bashExecutorArgs holds the arguments for bash command execution.
 type bashExecutorArgs struct {
 	Command  string `json:"command"`
@@ -190,8 +192,6 @@ func (e *BashExecutor) formatCompletedResult(waitErr error, stdout, stderr *Outp
 	}
 	return formatResult(exitCode, isError, stdout, stderr)
 }
-
-const rollingBufSize = 2 * DefaultMaxBytes // 100KB rolling buffer
 
 // processOutput sanitizes and truncates collector output. Returns the processed
 // string and truncation metadata. For running processes, this returns a snapshot;
