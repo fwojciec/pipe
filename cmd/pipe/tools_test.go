@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fwojciec/pipe"
+	pipeexec "github.com/fwojciec/pipe/exec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ func TestExecutor(t *testing.T) {
 
 	t.Run("dispatches bash tool", func(t *testing.T) {
 		t.Parallel()
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args := json.RawMessage(`{"command": "echo dispatched"}`)
 		result, err := exec.Execute(context.Background(), "bash", args)
 		require.NoError(t, err)
@@ -34,7 +35,7 @@ func TestExecutor(t *testing.T) {
 		path := filepath.Join(dir, "test.txt")
 		require.NoError(t, os.WriteFile(path, []byte("read me"), 0o644))
 
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args, _ := json.Marshal(map[string]any{"file_path": path})
 		result, err := exec.Execute(context.Background(), "read", args)
 		require.NoError(t, err)
@@ -50,7 +51,7 @@ func TestExecutor(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "out.txt")
 
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args, _ := json.Marshal(map[string]any{"file_path": path, "content": "written"})
 		result, err := exec.Execute(context.Background(), "write", args)
 		require.NoError(t, err)
@@ -67,7 +68,7 @@ func TestExecutor(t *testing.T) {
 		path := filepath.Join(dir, "edit.txt")
 		require.NoError(t, os.WriteFile(path, []byte("old value"), 0o644))
 
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args, _ := json.Marshal(map[string]any{
 			"file_path":  path,
 			"old_string": "old value",
@@ -88,7 +89,7 @@ func TestExecutor(t *testing.T) {
 		path := filepath.Join(dir, "test.txt")
 		require.NoError(t, os.WriteFile(path, []byte("findme\n"), 0o644))
 
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args, _ := json.Marshal(map[string]any{"pattern": "findme", "path": dir})
 		result, err := exec.Execute(context.Background(), "grep", args)
 		require.NoError(t, err)
@@ -104,7 +105,7 @@ func TestExecutor(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "test.go"), []byte(""), 0o644))
 
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		args, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
 		result, err := exec.Execute(context.Background(), "glob", args)
 		require.NoError(t, err)
@@ -117,7 +118,7 @@ func TestExecutor(t *testing.T) {
 
 	t.Run("returns tool error for unknown tool", func(t *testing.T) {
 		t.Parallel()
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		result, err := exec.Execute(context.Background(), "nonexistent", json.RawMessage(`{}`))
 		require.NoError(t, err)
 		require.True(t, result.IsError)
@@ -129,7 +130,7 @@ func TestExecutor(t *testing.T) {
 
 	t.Run("every tool in tools() is dispatchable", func(t *testing.T) {
 		t.Parallel()
-		exec := &executor{}
+		exec := &executor{bash: pipeexec.NewBashExecutor()}
 		for _, tool := range tools() {
 			t.Run(tool.Name, func(t *testing.T) {
 				t.Parallel()

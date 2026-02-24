@@ -14,14 +14,16 @@ import (
 var _ pipe.ToolExecutor = (*executor)(nil)
 
 // executor dispatches tool calls to the appropriate built-in tool implementation.
-type executor struct{}
+type executor struct {
+	bash *pipeexec.BashExecutor
+}
 
 // Execute dispatches a tool call by name. Unknown tool names return an IsError
 // result so the model can self-correct.
 func (e *executor) Execute(ctx context.Context, name string, args json.RawMessage) (*pipe.ToolResult, error) {
 	switch name {
 	case "bash":
-		return pipeexec.ExecuteBash(ctx, args)
+		return e.bash.Execute(ctx, args)
 	case "read":
 		return fs.ExecuteRead(ctx, args)
 	case "write":
@@ -43,7 +45,7 @@ func (e *executor) Execute(ctx context.Context, name string, args json.RawMessag
 // tools returns the tool definitions for all built-in tools.
 func tools() []pipe.Tool {
 	return []pipe.Tool{
-		pipeexec.BashTool(),
+		pipeexec.BashExecutorTool(),
 		fs.ReadTool(),
 		fs.WriteTool(),
 		fs.EditTool(),

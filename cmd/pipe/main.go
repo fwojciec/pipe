@@ -28,6 +28,7 @@ import (
 
 	"github.com/fwojciec/pipe"
 	bt "github.com/fwojciec/pipe/bubbletea"
+	pipeexec "github.com/fwojciec/pipe/exec"
 	pipejson "github.com/fwojciec/pipe/json"
 )
 
@@ -69,7 +70,7 @@ func run() error {
 	}
 
 	// Create tool executor and get tool definitions.
-	exec := &executor{}
+	exec := &executor{bash: pipeexec.NewBashExecutor()}
 	toolDefs := tools()
 
 	// Create agent loop.
