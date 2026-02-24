@@ -462,7 +462,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		} else {
 			b := NewThinkingBlock(m.styles)
 			if m.allExpanded {
-				b.Update(SetCollapsedMsg{Collapsed: false})
+				_, _ = b.Update(SetCollapsedMsg{Collapsed: false})
 			}
 			b.Append(e.Delta)
 			m.blocks = append(m.blocks, b)
@@ -473,7 +473,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 		m.hadToolCalls = true
 		b := NewToolCallBlock(e.Name, e.ID, m.styles)
 		if m.allExpanded {
-			b.Update(SetCollapsedMsg{Collapsed: false})
+			_, _ = b.Update(SetCollapsedMsg{Collapsed: false})
 		}
 		m.blocks = append(m.blocks, b)
 		m.activeToolCall[e.ID] = b
@@ -489,7 +489,7 @@ func (m Model) processEvent(evt pipe.Event) Model {
 	case pipe.EventToolResult:
 		b := NewToolResultBlock(e.ToolName, e.Content, e.IsError, m.styles)
 		if m.allExpanded && !e.IsError {
-			b.Update(SetCollapsedMsg{Collapsed: false})
+			_, _ = b.Update(SetCollapsedMsg{Collapsed: false})
 		}
 		m.blocks = append(m.blocks, b)
 		m = m.updateBlockFocus()
