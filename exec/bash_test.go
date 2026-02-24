@@ -151,5 +151,7 @@ func TestBashExecutor(t *testing.T) {
 		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{}))
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
+		text := resultText(t, result)
+		assert.Contains(t, text, "command")
 	})
 }
