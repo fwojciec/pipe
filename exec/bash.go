@@ -69,12 +69,6 @@ func NewBashExecutor() *BashExecutor {
 	return &BashExecutor{bg: NewBackgroundRegistry()}
 }
 
-// WaitBackground returns a channel that is closed when the background process
-// with the given pid completes. Returns nil if no such process is tracked.
-func (e *BashExecutor) WaitBackground(pid int) <-chan struct{} {
-	return e.bg.Done(pid)
-}
-
 // Execute runs a bash command or manages a background process.
 func (e *BashExecutor) Execute(ctx context.Context, args json.RawMessage) (*pipe.ToolResult, error) {
 	var a bashExecutorArgs

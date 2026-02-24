@@ -67,9 +67,9 @@ func (r *BackgroundRegistry) Register(pid int, bp *BackgroundProcess) {
 	r.processes[pid] = bp
 }
 
-// Done returns a channel that is closed when the background process with the
+// done returns a channel that is closed when the background process with the
 // given pid completes. Returns nil if no process with that pid is tracked.
-func (r *BackgroundRegistry) Done(pid int) <-chan struct{} {
+func (r *BackgroundRegistry) done(pid int) <-chan struct{} {
 	r.mu.Lock()
 	bp, ok := r.processes[pid]
 	r.mu.Unlock()
