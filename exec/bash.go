@@ -131,6 +131,9 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pip
 
 	stdoutDone := make(chan struct{})
 	stderrDone := make(chan struct{})
+	// io.Copy errors are intentionally ignored: the only read error is io.EOF
+	// (pipe closed when process exits), and write errors are tracked by
+	// OutputCollector.Err() which is checked when formatting results.
 	go func() { _, _ = io.Copy(stdoutC, stdoutR); stdoutR.Close(); close(stdoutDone) }()
 	go func() { _, _ = io.Copy(stderrC, stderrR); stderrR.Close(); close(stderrDone) }()
 
