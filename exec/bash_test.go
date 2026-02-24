@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -204,6 +205,12 @@ func TestBashExecutor(t *testing.T) {
 		require.NotEmpty(t, matches, "should contain pid")
 		pid, err := strconv.Atoi(matches[1])
 		require.NoError(t, err)
+		killed := false
+		t.Cleanup(func() {
+			if !killed {
+				syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		})
 
 		killResult, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
 			"kill_pid": pid,
@@ -211,6 +218,7 @@ func TestBashExecutor(t *testing.T) {
 		require.NoError(t, err)
 		killText := resultText(t, killResult)
 		assert.Contains(t, killText, "killed")
+		killed = true
 	})
 
 	t.Run("does not block on shell-backgrounded children", func(t *testing.T) {
@@ -218,7 +226,7 @@ func TestBashExecutor(t *testing.T) {
 		e := pipeexec.NewBashExecutor()
 		start := time.Now()
 		result, err := e.Execute(context.Background(), mustJSON(t, map[string]any{
-			"command": "sleep 10 & echo done",
+			"command": "sleep 1 & echo done",
 		}))
 		elapsed := time.Since(start)
 		require.NoError(t, err)

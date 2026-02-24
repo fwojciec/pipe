@@ -153,6 +153,8 @@ func (e *BashExecutor) runCommand(ctx context.Context, a bashExecutorArgs) (*pip
 		go func() { <-stdoutDone; <-stderrDone; close(pipesDone) }()
 		select {
 		case <-pipesDone:
+			stdoutR.Close()
+			stderrR.Close()
 		case <-time.After(100 * time.Millisecond):
 			stdoutR.Close()
 			stderrR.Close()
