@@ -6,7 +6,7 @@
 - dependency injection
 - optimize for testability
 
-## Quality Gatge
+## Quality Gate
 
 make validate
 
