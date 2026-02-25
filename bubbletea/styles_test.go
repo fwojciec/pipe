@@ -33,8 +33,6 @@ func TestNewStyles(t *testing.T) {
 	assert.Equal(t, lipgloss.Color("5"), styles.Accent.GetForeground())
 	assert.True(t, styles.Accent.GetBold())
 
-	assert.Equal(t, lipgloss.Color("0"), styles.CodeBg.GetBackground())
-
 	assert.Equal(t, lipgloss.Color("234"), styles.UserBg.GetBackground())
 	assert.Equal(t, lipgloss.Color("235"), styles.ToolCallBg.GetBackground())
 	assert.Equal(t, lipgloss.Color("236"), styles.ToolResultBg.GetBackground())

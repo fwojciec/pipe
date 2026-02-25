@@ -18,6 +18,5 @@ func TestDefaultTheme(t *testing.T) {
 	assert.Equal(t, 8, theme.Thinking)
 	assert.Equal(t, 2, theme.Success)
 	assert.Equal(t, 8, theme.Muted)
-	assert.Equal(t, 0, theme.CodeBg)
 	assert.Equal(t, 5, theme.Accent)
 }

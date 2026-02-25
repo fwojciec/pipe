@@ -16,7 +16,6 @@ type Styles struct {
 	Success      lipgloss.Style
 	Muted        lipgloss.Style
 	Accent       lipgloss.Style
-	CodeBg       lipgloss.Style
 	UserBg       lipgloss.Style
 	ToolCallBg   lipgloss.Style
 	ToolResultBg lipgloss.Style
@@ -33,7 +32,6 @@ func NewStyles(t pipe.Theme) Styles {
 		Success:      lipgloss.NewStyle().Foreground(ansiColor(t.Success)),
 		Muted:        lipgloss.NewStyle().Foreground(ansiColor(t.Muted)).Faint(true),
 		Accent:       lipgloss.NewStyle().Foreground(ansiColor(t.Accent)).Bold(true),
-		CodeBg:       lipgloss.NewStyle().Background(ansiColor(t.CodeBg)),
 		UserBg:       lipgloss.NewStyle().Background(ansiColor(t.UserBg)).PaddingLeft(1),
 		ToolCallBg:   lipgloss.NewStyle().Background(ansiColor(t.ToolCallBg)).PaddingLeft(1),
 		ToolResultBg: lipgloss.NewStyle().Background(ansiColor(t.ToolResultBg)).PaddingLeft(1),

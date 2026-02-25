@@ -69,6 +69,13 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, stripANSI(result), "code")
 	})
 
+	t.Run("inline code renders same as bold text", func(t *testing.T) {
+		t.Parallel()
+		inlineCode := goldmark.Render("`code`", 80, theme)
+		boldText := goldmark.Render("**code**", 80, theme)
+		assert.Equal(t, inlineCode, boldText)
+	})
+
 	t.Run("fenced code block preserves content without reflow", func(t *testing.T) {
 		t.Parallel()
 		src := "```go\nfmt.Println(\"hello world\")\n```"
@@ -170,12 +177,36 @@ func TestRender(t *testing.T) {
 		assert.Contains(t, stripANSI(result), "some code")
 	})
 
+	t.Run("fenced code block lines have gutter", func(t *testing.T) {
+		t.Parallel()
+		src := "```\nline one\nline two\n```"
+		result := goldmark.Render(src, 80, theme)
+		stripped := stripANSI(result)
+		for _, line := range strings.Split(stripped, "\n") {
+			if strings.Contains(line, "line one") || strings.Contains(line, "line two") {
+				assert.Contains(t, line, "│", "code line should have gutter: %q", line)
+			}
+		}
+	})
+
 	t.Run("indented code block", func(t *testing.T) {
 		t.Parallel()
 		src := "paragraph\n\n    indented code\n    more code"
 		result := goldmark.Render(src, 80, theme)
 		assert.Contains(t, stripANSI(result), "indented code")
 		assert.Contains(t, stripANSI(result), "more code")
+	})
+
+	t.Run("indented code block lines have gutter", func(t *testing.T) {
+		t.Parallel()
+		src := "paragraph\n\n    indented code\n    more code"
+		result := goldmark.Render(src, 80, theme)
+		stripped := stripANSI(result)
+		for _, line := range strings.Split(stripped, "\n") {
+			if strings.Contains(line, "indented code") || strings.Contains(line, "more code") {
+				assert.Contains(t, line, "│", "indented code line should have gutter: %q", line)
+			}
+		}
 	})
 
 	t.Run("thematic break", func(t *testing.T) {

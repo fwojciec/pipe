@@ -11,7 +11,6 @@ type Theme struct {
 	Error        int // Error messages
 	Success      int // Success indicators
 	Muted        int // Status bar, placeholders
-	CodeBg       int // Code block background
 	Accent       int // Headings, links
 	UserBg       int // User message block background
 	ToolCallBg   int // Tool call block background
@@ -28,7 +27,6 @@ func DefaultTheme() Theme {
 		Error:        1,
 		Success:      2,
 		Muted:        8,
-		CodeBg:       0,
 		Accent:       5,
 		UserBg:       234,
 		ToolCallBg:   235,

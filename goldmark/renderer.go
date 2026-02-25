@@ -16,7 +16,6 @@ import (
 type ansiRenderer struct {
 	bold      lipgloss.Style
 	italic    lipgloss.Style
-	codeBg    lipgloss.Style
 	accent    lipgloss.Style
 	muted     lipgloss.Style
 	underline lipgloss.Style
@@ -26,7 +25,6 @@ func newRenderer(theme pipe.Theme) *ansiRenderer {
 	return &ansiRenderer{
 		bold:      lipgloss.NewStyle().Bold(true),
 		italic:    lipgloss.NewStyle().Italic(true),
-		codeBg:    lipgloss.NewStyle().Background(ansiColor(theme.CodeBg)),
 		accent:    lipgloss.NewStyle().Foreground(ansiColor(theme.Accent)).Bold(true),
 		muted:     lipgloss.NewStyle().Foreground(ansiColor(theme.Muted)).Faint(true),
 		underline: lipgloss.NewStyle().Underline(true),
@@ -83,11 +81,12 @@ func (r *ansiRenderer) renderBlock(node ast.Node, source []byte, width int, buf 
 			buf.WriteString(r.muted.Render(lang))
 			buf.WriteString("\n")
 		}
+		gutter := r.muted.Render("│") + " "
 		lines := n.Lines()
 		for i := 0; i < lines.Len(); i++ {
 			line := lines.At(i)
 			content := strings.TrimRight(string(line.Value(source)), "\n")
-			buf.WriteString(r.codeBg.Render(content))
+			buf.WriteString(gutter + content)
 			buf.WriteString("\n")
 		}
 		if n.NextSibling() != nil {
@@ -95,11 +94,12 @@ func (r *ansiRenderer) renderBlock(node ast.Node, source []byte, width int, buf 
 		}
 
 	case *ast.CodeBlock:
+		gutter := r.muted.Render("│") + " "
 		lines := n.Lines()
 		for i := 0; i < lines.Len(); i++ {
 			line := lines.At(i)
 			content := strings.TrimRight(string(line.Value(source)), "\n")
-			buf.WriteString(r.codeBg.Render(content))
+			buf.WriteString(gutter + content)
 			buf.WriteString("\n")
 		}
 		if n.NextSibling() != nil {
@@ -232,7 +232,7 @@ func (r *ansiRenderer) renderInline(node ast.Node, source []byte, buf *bytes.Buf
 
 	case *ast.CodeSpan:
 		inner := r.collectInline(n, source)
-		buf.WriteString(r.codeBg.Render(inner))
+		buf.WriteString(r.bold.Render(inner))
 
 	case *ast.Link:
 		inner := r.collectInline(n, source)
